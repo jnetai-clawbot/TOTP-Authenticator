@@ -37,4 +37,8 @@
     <!-- Errors -->
     <string name="error_invalid_qr">Invalid QR code</string>
     <string name="error_camera_permission">Camera permission required for QR scanning</string>
+    
+    <!-- Import/Export -->
+    <string name="import_sites">Import Sites</string>
+    <string name="export_sites">Export Sites</string>
 </resources>

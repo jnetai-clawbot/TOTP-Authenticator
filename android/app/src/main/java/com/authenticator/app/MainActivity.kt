@@ -3,8 +3,11 @@ package com.authenticator.app
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
-import android.util.Base64
+import android.view.Menu
+import android.view.MenuItem
 import android.view.View
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -20,18 +23,18 @@ import com.authenticator.app.databinding.DialogEditSiteBinding
 import com.authenticator.app.db.Site
 import com.authenticator.app.db.SiteDatabase
 import com.authenticator.app.totp.TOTPGenerator
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.Scope
 import com.google.zxing.integration.android.IntentIntegrator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.security.KeyStore
-import javax.crypto.Cipher
-import javax.crypto.KeyGenerator
-import javax.crypto.SecretKey
-import javax.crypto.spec.GCMParameterSpec
-import android.security.keystore.KeyProperties
-import android.security.keystore.KeyGenParameterSpec
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.InputStreamReader
 
 class MainActivity : AppCompatActivity() {
     
@@ -43,6 +46,29 @@ class MainActivity : AppCompatActivity() {
     private var currentCodes = mutableMapOf<String, Pair<String, Int>>()
     private var isRefreshing = false
     
+    private val googleSignInClient by lazy {
+        val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestEmail()
+            .requestProfile()
+            .requestScopes(Scope("https://www.googleapis.com/auth/userinfo.email"))
+            .build()
+        GoogleSignIn.getClient(this, gso)
+    }
+    
+    private val googleSignInLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+            try {
+                val account = task.getResult()
+                Toast.makeText(this, "Signed in as ${account.email}", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(this, "Sign in failed", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    
     private val qrScanLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -53,6 +79,18 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+    
+    private val importFileLauncher = registerForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let { importFromUri(it) }
+    }
+    
+    private val exportFileLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        uri?.let { exportToUri(it) }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -62,12 +100,50 @@ class MainActivity : AppCompatActivity() {
         database = SiteDatabase.getInstance(this)
         totpGenerator = TOTPGenerator()
         
+        setSupportActionBar(binding.toolbar)
+        
         setupRecyclerView()
         setupClickListeners()
         setupSwipeToDelete()
+        checkGoogleSignIn()
         
         loadSites()
         startCodeRefresh()
+    }
+    
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menuInflater.inflate(R.menu.menu_main, menu)
+        return true
+    }
+    
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        return when (item.itemId) {
+            R.id.action_import -> {
+                importFileLauncher.launch("application/json")
+                true
+            }
+            R.id.action_export -> {
+                exportFileLauncher.launch("totp_backup.json")
+                true
+            }
+            R.id.action_google_sign_in -> {
+                signInWithGoogle()
+                true
+            }
+            else -> super.onOptionsItemSelected(item)
+        }
+    }
+    
+    private fun checkGoogleSignIn() {
+        val account = GoogleSignIn.getLastSignedInAccount(this)
+        if (account != null) {
+            invalidateOptionsMenu()
+        }
+    }
+    
+    private fun signInWithGoogle() {
+        val signInIntent = googleSignInClient.signInIntent
+        googleSignInLauncher.launch(signInIntent)
     }
     
     private fun setupRecyclerView() {
@@ -325,20 +401,89 @@ class MainActivity : AppCompatActivity() {
         }
     }
     
+    private fun importFromUri(uri: Uri) {
+        try {
+            val inputStream = contentResolver.openInputStream(uri)
+            val reader = BufferedReader(InputStreamReader(inputStream))
+            val jsonString = reader.readText()
+            reader.close()
+            
+            val json = JSONArray(jsonString)
+            var imported = 0
+            
+            for (i in 0 until json.length()) {
+                val obj = json.getJSONObject(i)
+                val site = Site(
+                    id = java.util.UUID.randomUUID().toString(),
+                    name = obj.getString("name"),
+                    secret = encryptSecret(obj.getString("secret")),
+                    issuer = obj.optString("issuer", ""),
+                    digits = obj.optInt("digits", 6),
+                    period = obj.optInt("period", 30),
+                    algorithm = obj.optString("algorithm", "SHA1"),
+                    enabled = true,
+                    createdAt = System.currentTimeMillis()
+                )
+                
+                // Check if site already exists
+                val existing = database.siteDao().getAll().find { it.name == site.name }
+                if (existing == null) {
+                    database.siteDao().insert(site)
+                    imported++
+                }
+            }
+            
+            loadSites()
+            Toast.makeText(this, "Imported $imported sites", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Import failed: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+    
+    private fun exportToUri(uri: Uri) {
+        try {
+            lifecycleScope.launch(Dispatchers.IO) {
+                val sites = database.siteDao().getAll()
+                val jsonArray = JSONArray()
+                
+                for (site in sites) {
+                    val obj = JSONObject().apply {
+                        put("name", site.name)
+                        put("secret", decryptSecret(site.secret))
+                        put("issuer", site.issuer)
+                        put("digits", site.digits)
+                        put("period", site.period)
+                        put("algorithm", site.algorithm)
+                    }
+                    jsonArray.put(obj)
+                }
+                
+                withContext(Dispatchers.Main) {
+                    contentResolver.openOutputStream(uri)?.use { outputStream ->
+                        outputStream.write(jsonArray.toString(2).toByteArray())
+                    }
+                    Toast.makeText(this@MainActivity, "Exported ${sites.size} sites", Toast.LENGTH_SHORT).show()
+                }
+            }
+        } catch (e: Exception) {
+            Toast.makeText(this, "Export failed: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+    
     private fun encryptSecret(secret: String): String {
-        val keyStore = KeyStore.getInstance("AndroidKeyStore")
+        val keyStore = java.security.KeyStore.getInstance("AndroidKeyStore")
         keyStore.load(null)
         
         if (!keyStore.containsAlias("totp_key")) {
-            val keyGenerator = KeyGenerator.getInstance(
-                KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore"
+            val keyGenerator = java.security.KeyGenerator.getInstance(
+                java.security.KeyStore.KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore"
             )
             val spec = android.security.keystore.KeyGenParameterSpec.Builder(
                 "totp_key",
-                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+                android.security.keystore.KeyProperties.PURPOSE_ENCRYPT or android.security.keystore.KeyProperties.PURPOSE_DECRYPT
             )
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setBlockModes(android.security.keystore.KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(android.security.keystore.KeyProperties.ENCRYPTION_PADDING_NONE)
                 .setKeySize(256)
                 .build()
             
@@ -346,31 +491,31 @@ class MainActivity : AppCompatActivity() {
             keyGenerator.generateKey()
         }
         
-        val key = keyStore.getKey("totp_key", null) as SecretKey
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.ENCRYPT_MODE, key)
+        val key = keyStore.getKey("totp_key", null) as javax.crypto.SecretKey
+        val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, key)
         
         val encrypted = cipher.doFinal(secret.toByteArray())
         val iv = cipher.iv
         
         val combined = iv + encrypted
-        return Base64.encodeToString(combined, Base64.NO_WRAP)
+        return android.util.Base64.encodeToString(combined, android.util.Base64.NO_WRAP)
     }
     
     private fun decryptSecret(encrypted: String): String {
         return try {
-            val keyStore = KeyStore.getInstance("AndroidKeyStore")
+            val keyStore = java.security.KeyStore.getInstance("AndroidKeyStore")
             keyStore.load(null)
             
-            val key = keyStore.getKey("totp_key", null) as? SecretKey ?: return ""
+            val key = keyStore.getKey("totp_key", null) as? javax.crypto.SecretKey ?: return ""
             
-            val combined = Base64.decode(encrypted, Base64.NO_WRAP)
+            val combined = android.util.Base64.decode(encrypted, android.util.Base64.NO_WRAP)
             val iv = combined.copyOfRange(0, 12)
             val encryptedBytes = combined.copyOfRange(12, combined.size)
             
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            val spec = GCMParameterSpec(128, iv)
-            cipher.init(Cipher.DECRYPT_MODE, key, spec)
+            val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+            val spec = javax.crypto.spec.GCMParameterSpec(128, iv)
+            cipher.init(javax.crypto.Cipher.DECRYPT_MODE, key, spec)
             
             String(cipher.doFinal(encryptedBytes))
         } catch (e: Exception) {
