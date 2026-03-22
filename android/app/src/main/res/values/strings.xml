@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Authenticator</string>
+    
+    <!-- Auth -->
+    <string name="sign_in_with_google">Sign in with Google</string>
+    <string name="google_account">Google Account</string>
+    <string name="sign_out">Sign Out</string>
+    
+    <!-- Sites -->
+    <string name="add_site">Add Site</string>
+    <string name="edit">Edit</string>
+    <string name="delete">Delete</string>
+    <string name="save">Save</string>
+    <string name="cancel">Cancel</string>
+    
+    <!-- Site Form -->
+    <string name="site_name">Site Name</string>
+    <string name="totp_secret">TOTP Secret</string>
+    <string name="totp_secret_new">New TOTP Secret (leave blank to keep current)</string>
+    <string name="issuer_optional">Issuer (optional)</string>
+    <string name="enabled">Enabled</string>
+    
+    <!-- Actions -->
+    <string name="copy">Copy</string>
+    <string name="scan_qr_code">Scan QR Code</string>
+    <string name="refresh_codes">Refresh Codes</string>
+    
+    <!-- Empty States -->
+    <string name="empty_state">No sites added yet.\nTap + to add your first authenticator site.</string>
+    <string name="sign_in_prompt">Sign in with Google to sync your authenticator</string>
+    
+    <!-- Dialogs -->
+    <string name="delete_site_title">Delete Site</string>
+    <string name="delete_site_message">Are you sure you want to delete %s? This cannot be undone.</string>
+    
+    <!-- Errors -->
+    <string name="error_invalid_qr">Invalid QR code</string>
+    <string name="error_camera_permission">Camera permission required for QR scanning</string>
+</resources>

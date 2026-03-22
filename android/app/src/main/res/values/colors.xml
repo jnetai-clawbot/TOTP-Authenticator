@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Primary Colors -->
+    <color name="primary">#00D4FF</color>
+    <color name="primary_dark">#00A8CC</color>
+    <color name="primary_light">#66E5FF</color>
+    
+    <!-- Background Colors -->
+    <color name="background">#1A1A2E</color>
+    <color name="surface">#16213E</color>
+    <color name="surface_elevated">#1F2B47</color>
+    
+    <!-- Text Colors -->
+    <color name="text_primary">#FFFFFF</color>
+    <color name="text_secondary">#B0B0B0</color>
+    <color name="text_hint">#707070</color>
+    
+    <!-- Status Colors -->
+    <color name="success">#2ED573</color>
+    <color name="error">#FF4757</color>
+    <color name="warning">#FFA502</color>
+    
+    <!-- TOTP Code Color -->
+    <color name="code_color">#00D4FF</color>
+    
+    <!-- Progress -->
+    <color name="progress_background">#333333</color>
+    <color name="progress_foreground">#00D4FF</color>
+</resources>
