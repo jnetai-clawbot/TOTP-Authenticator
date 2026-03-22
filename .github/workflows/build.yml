@@ -3,8 +3,8 @@ name: Build Android APK
 on:
   push:
     branches: [ main ]
-    paths:
-      - 'android/**'
+    paths-ignore:
+      - '**.md'
   workflow_dispatch:
 
 jobs:
