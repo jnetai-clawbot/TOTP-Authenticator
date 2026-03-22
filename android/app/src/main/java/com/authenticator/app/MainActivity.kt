@@ -3,17 +3,12 @@ package com.authenticator.app
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.content.Intent
 import android.os.Bundle
-import android.security.keystore.KeyGenParameterSpec
-import android.security.keystore.KeyProperties
 import android.view.View
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.biometric.BiometricPrompt
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -24,43 +19,21 @@ import com.authenticator.app.databinding.DialogEditSiteBinding
 import com.authenticator.app.db.Site
 import com.authenticator.app.db.SiteDatabase
 import com.authenticator.app.totp.TOTPGenerator
-import com.authenticator.app.auth.GoogleAuthManager
-import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInAccount
-import com.google.android.gms.auth.api.signin.GoogleSignInClient
-import com.google.android.gms.auth.api.signin.GoogleSignInOptions
-import com.google.android.gms.common.api.ApiException
 import com.google.zxing.integration.android.IntentIntegrator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.security.KeyStore
-import javax.crypto.Cipher
-import javax.crypto.KeyGenerator
-import javax.crypto.SecretKey
-import javax.crypto.spec.GCMParameterSpec
 
 class MainActivity : AppCompatActivity() {
     
     private lateinit var binding: ActivityMainBinding
     private lateinit var database: SiteDatabase
     private lateinit var totpGenerator: TOTPGenerator
-    private lateinit var googleSignInClient: GoogleSignInClient
     private lateinit var adapter: SitesAdapter
-    
-    private var googleAccessToken: String? = null
-    private var currentCodes = mutableMapOf<String, Pair<String, Int>>() // name -> (code, remaining)
+
+    private var currentCodes = mutableMapOf<String, Pair<String, Int>>()
     private var isRefreshing = false
-    
-    private val googleSignInLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == RESULT_OK) {
-            val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
-            handleGoogleSignIn(task)
-        }
-    }
     
     private val qrScanLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -81,103 +54,18 @@ class MainActivity : AppCompatActivity() {
         database = SiteDatabase.getInstance(this)
         totpGenerator = TOTPGenerator()
         
-        setupGoogleSignIn()
         setupRecyclerView()
         setupClickListeners()
         setupSwipeToDelete()
-        checkBiometricAvailability()
         
-        // Start code refresh loop
+        loadSites()
         startCodeRefresh()
-    }
-    
-    private fun setupGoogleSignIn() {
-        val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-            .requestEmail()
-            .requestProfile()
-            .build()
-        
-        googleSignInClient = GoogleSignIn.getClient(this, gso)
-        
-        // Check if already signed in
-        val account = GoogleSignIn.getLastSignedInAccount(this)
-        if (account != null) {
-            updateLoginStatus(account)
-            googleAccessToken = account.idToken
-        } else {
-            showLoginPrompt()
-        }
-    }
-    
-    private fun handleGoogleSignIn(task: com.google.android.gms.tasks.Task<GoogleSignInAccount>) {
-        try {
-            val account = task.getResult(ApiException::class.java)
-            updateLoginStatus(account)
-            googleAccessToken = account.idToken
-            Toast.makeText(this, "Signed in as ${account.email}", Toast.LENGTH_SHORT).show()
-        } catch (e: ApiException) {
-            Toast.makeText(this, "Sign in failed: ${e.message}", Toast.LENGTH_SHORT).show()
-        }
-    }
-    
-    private fun updateLoginStatus(account: GoogleSignInAccount) {
-        binding.btnGoogleSignIn.visibility = View.GONE
-        binding.tvUserEmail.visibility = View.VISIBLE
-        binding.tvUserEmail.text = account.email
-    }
-    
-    private fun showLoginPrompt() {
-        binding.btnGoogleSignIn.visibility = View.VISIBLE
-        binding.tvUserEmail.visibility = View.GONE
-    }
-    
-    private fun checkBiometricAvailability() {
-        val biometricManager = BiometricPrompt.BiometricManager.from(this)
-        val canAuthenticate = biometricManager.canAuthenticate(
-            BiometricPrompt.AUTHENTICATORS_BIOMETRIC_STRONG or
-            BiometricPrompt.AUTHENTICATORS_DEVICE_CREDENTIAL
-        )
-        
-        when (canAuthenticate) {
-            BiometricPrompt.BIOMETRIC_SUCCESS -> {
-                // Biometric available
-            }
-            BiometricPrompt.BIOMETRIC_ERROR_NO_HARDWARE,
-            BiometricPrompt.BIOMETRIC_ERROR_HW_UNAVAILABLE -> {
-                // Fall back to master password
-                showMasterPasswordDialog()
-            }
-            else -> {
-                // Use master password
-                showMasterPasswordDialog()
-            }
-        }
-    }
-    
-    private fun showMasterPasswordDialog() {
-        // For demo, use a simple password check
-        // In production, use proper keychain storage
-        val prefs = getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
-        if (!prefs.contains("master_password_hash")) {
-            // First time - set password
-            AlertDialog.Builder(this)
-                .setTitle("Set Master Password")
-                .setMessage("Create a master password to secure your authenticator data.")
-                .setPositiveButton("OK") { _, _ ->
-                    // For demo, auto-create a password
-                    // In production, show password creation dialog
-                }
-                .show()
-        }
     }
     
     private fun setupRecyclerView() {
         adapter = SitesAdapter(
             onCopyClick = { site -> copyCode(site.name) },
-            onEditClick = { site -> showEditDialog(site) },
-            onCodeGenerated = { name, code, remaining ->
-                adapter.updateCode(name, code, remaining)
-            }
+            onEditClick = { site -> showEditDialog(site) }
         )
         
         binding.recyclerSites.layoutManager = LinearLayoutManager(this)
@@ -185,10 +73,6 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun setupClickListeners() {
-        binding.btnGoogleSignIn.setOnClickListener {
-            signInWithGoogle()
-        }
-        
         binding.fabAddSite.setOnClickListener {
             showAddSiteDialog()
         }
@@ -220,11 +104,6 @@ class MainActivity : AppCompatActivity() {
         ItemTouchHelper(swipeHandler).attachToRecyclerView(binding.recyclerSites)
     }
     
-    private fun signInWithGoogle() {
-        val signInIntent = googleSignInClient.signInIntent
-        googleSignInLauncher.launch(signInIntent)
-    }
-    
     private fun scanQRCode() {
         val integrator = IntentIntegrator(this)
         integrator.setDesiredBarcodeFormats(IntentIntegrator.QR_CODE)
@@ -252,9 +131,6 @@ class MainActivity : AppCompatActivity() {
             val secret = params["secret"] ?: ""
             val issuer = params["issuer"] ?: labelPart.split(":").getOrElse(1) { "" }
             val name = if (labelPart.contains(":")) labelPart.split(":")[0] else labelPart
-            val algorithm = params["algorithm"] ?: "SHA1"
-            val digits = params["digits"]?.toIntOrNull() ?: 6
-            val period = params["period"]?.toIntOrNull() ?: 30
             
             if (secret.isNotEmpty()) {
                 showAddSiteDialog(name, secret, issuer)
@@ -317,7 +193,7 @@ class MainActivity : AppCompatActivity() {
         
         dialogBinding.etName.setText(site.name)
         dialogBinding.etIssuer.setText(site.issuer)
-        dialogBinding.etSecret.setText("") // Don't show existing secret
+        dialogBinding.etSecret.setText("")
         dialogBinding.switchEnabled.isChecked = site.enabled
         
         AlertDialog.Builder(this)
@@ -400,7 +276,7 @@ class MainActivity : AppCompatActivity() {
                 if (!isRefreshing) {
                     refreshCodes()
                 }
-                delay(1000) // Update every second
+                delay(1000)
             }
         }
     }
@@ -441,21 +317,20 @@ class MainActivity : AppCompatActivity() {
         }
     }
     
-    // Encryption helpers using Android Keystore
     private fun encryptSecret(secret: String): String {
-        val keyStore = KeyStore.getInstance("AndroidKeyStore")
+        val keyStore = android.security.keystore.KeyStore.getInstance("AndroidKeyStore")
         keyStore.load(null)
         
         if (!keyStore.containsAlias("totp_key")) {
-            val keyGenerator = KeyGenerator.getInstance(
-                KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore"
+            val keyGenerator = android.security.keystore.KeyGenerator.getInstance(
+                android.security.keystore.KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore"
             )
-            val spec = KeyGenParameterSpec.Builder(
+            val spec = android.security.keystore.KeyGenParameterSpec.Builder(
                 "totp_key",
-                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+                android.security.keystore.KeyProperties.PURPOSE_ENCRYPT or android.security.keystore.KeyProperties.PURPOSE_DECRYPT
             )
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setBlockModes(android.security.keystore.KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(android.security.keystore.KeyProperties.ENCRYPTION_PADDING_NONE)
                 .setKeySize(256)
                 .build()
             
@@ -463,33 +338,36 @@ class MainActivity : AppCompatActivity() {
             keyGenerator.generateKey()
         }
         
-        val key = keyStore.getKey("totp_key", null) as SecretKey
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.ENCRYPT_MODE, key)
+        val key = keyStore.getKey("totp_key", null) as javax.crypto.SecretKey
+        val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, key)
         
         val encrypted = cipher.doFinal(secret.toByteArray())
         val iv = cipher.iv
         
-        // Combine IV + encrypted data and encode to base64
         val combined = iv + encrypted
         return android.util.Base64.encodeToString(combined, android.util.Base64.NO_WRAP)
     }
     
     private fun decryptSecret(encrypted: String): String {
-        val keyStore = KeyStore.getInstance("AndroidKeyStore")
-        keyStore.load(null)
-        
-        val key = keyStore.getKey("totp_key", null) as? SecretKey ?: return ""
-        
-        val combined = android.util.Base64.decode(encrypted, android.util.Base64.NO_WRAP)
-        val iv = combined.copyOfRange(0, 12)
-        val encryptedBytes = combined.copyOfRange(12, combined.size)
-        
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        val spec = GCMParameterSpec(128, iv)
-        cipher.init(Cipher.DECRYPT_MODE, key, spec)
-        
-        return String(cipher.doFinal(encryptedBytes))
+        return try {
+            val keyStore = android.security.keystore.KeyStore.getInstance("AndroidKeyStore")
+            keyStore.load(null)
+            
+            val key = keyStore.getKey("totp_key", null) as? javax.crypto.SecretKey ?: return ""
+            
+            val combined = android.util.Base64.decode(encrypted, android.util.Base64.NO_WRAP)
+            val iv = combined.copyOfRange(0, 12)
+            val encryptedBytes = combined.copyOfRange(12, combined.size)
+            
+            val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+            val spec = javax.crypto.spec.GCMParameterSpec(128, iv)
+            cipher.init(javax.crypto.Cipher.DECRYPT_MODE, key, spec)
+            
+            String(cipher.doFinal(encryptedBytes))
+        } catch (e: Exception) {
+            ""
+        }
     }
     
     override fun onResume() {
