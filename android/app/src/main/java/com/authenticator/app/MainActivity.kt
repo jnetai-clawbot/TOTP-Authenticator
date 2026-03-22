@@ -78,7 +78,7 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         
-        database = SiteDatabase(this)
+        database = SiteDatabase.getInstance(this)
         totpGenerator = TOTPGenerator()
         
         setupGoogleSignIn()
