@@ -10,8 +10,7 @@ import com.authenticator.app.db.Site
 
 class SitesAdapter(
     private val onCopyClick: (Site) -> Unit,
-    private val onEditClick: (Site) -> Unit,
-    private val onCodeGenerated: (String, String, Int) -> Unit
+    private val onEditClick: (Site) -> Unit
 ) : ListAdapter<Site, SitesAdapter.SiteViewHolder>(SiteDiffCallback()) {
 
     private var currentCodes = mutableMapOf<String, Pair<String, Int>>()

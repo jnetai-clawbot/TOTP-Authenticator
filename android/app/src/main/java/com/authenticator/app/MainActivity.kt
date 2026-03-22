@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.os.Bundle
+import android.util.Base64
 import android.view.View
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -24,6 +25,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.security.KeyStore
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
 
 class MainActivity : AppCompatActivity() {
     
@@ -318,19 +326,19 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun encryptSecret(secret: String): String {
-        val keyStore = android.security.keystore.KeyStore.getInstance("AndroidKeyStore")
+        val keyStore = KeyStore.getInstance("AndroidKeyStore")
         keyStore.load(null)
         
         if (!keyStore.containsAlias("totp_key")) {
-            val keyGenerator = android.security.keystore.KeyGenerator.getInstance(
-                android.security.keystore.KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore"
+            val keyGenerator = KeyGenerator.getInstance(
+                KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore"
             )
-            val spec = android.security.keystore.KeyGenParameterSpec.Builder(
+            val spec = KeyGenParameterSpec.Builder(
                 "totp_key",
-                android.security.keystore.KeyProperties.PURPOSE_ENCRYPT or android.security.keystore.KeyProperties.PURPOSE_DECRYPT
+                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
             )
-                .setBlockModes(android.security.keystore.KeyProperties.BLOCK_MODE_GCM)
-                .setEncryptionPaddings(android.security.keystore.KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
                 .setKeySize(256)
                 .build()
             
@@ -338,31 +346,31 @@ class MainActivity : AppCompatActivity() {
             keyGenerator.generateKey()
         }
         
-        val key = keyStore.getKey("totp_key", null) as javax.crypto.SecretKey
-        val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, key)
+        val key = keyStore.getKey("totp_key", null) as SecretKey
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, key)
         
         val encrypted = cipher.doFinal(secret.toByteArray())
         val iv = cipher.iv
         
         val combined = iv + encrypted
-        return android.util.Base64.encodeToString(combined, android.util.Base64.NO_WRAP)
+        return Base64.encodeToString(combined, Base64.NO_WRAP)
     }
     
     private fun decryptSecret(encrypted: String): String {
         return try {
-            val keyStore = android.security.keystore.KeyStore.getInstance("AndroidKeyStore")
+            val keyStore = KeyStore.getInstance("AndroidKeyStore")
             keyStore.load(null)
             
-            val key = keyStore.getKey("totp_key", null) as? javax.crypto.SecretKey ?: return ""
+            val key = keyStore.getKey("totp_key", null) as? SecretKey ?: return ""
             
-            val combined = android.util.Base64.decode(encrypted, android.util.Base64.NO_WRAP)
+            val combined = Base64.decode(encrypted, Base64.NO_WRAP)
             val iv = combined.copyOfRange(0, 12)
             val encryptedBytes = combined.copyOfRange(12, combined.size)
             
-            val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
-            val spec = javax.crypto.spec.GCMParameterSpec(128, iv)
-            cipher.init(javax.crypto.Cipher.DECRYPT_MODE, key, spec)
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            val spec = GCMParameterSpec(128, iv)
+            cipher.init(Cipher.DECRYPT_MODE, key, spec)
             
             String(cipher.doFinal(encryptedBytes))
         } catch (e: Exception) {
