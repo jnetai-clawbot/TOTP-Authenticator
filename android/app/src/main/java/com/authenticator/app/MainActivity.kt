@@ -30,8 +30,8 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
-import javax.crypto.spec.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import android.security.keystore.KeyGenParameterSpec
 
 class MainActivity : AppCompatActivity() {
     
@@ -333,7 +333,7 @@ class MainActivity : AppCompatActivity() {
             val keyGenerator = KeyGenerator.getInstance(
                 KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore"
             )
-            val spec = KeyGenParameterSpec.Builder(
+            val spec = android.security.keystore.KeyGenParameterSpec.Builder(
                 "totp_key",
                 KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
             )
