@@ -22,38 +22,21 @@ jobs:
           java-version: '17'
       
       - name: Setup Android SDK
-        uses: androidsdk/setup-android@v1
-        with:
-          sdk-components: 'platform-tools;platforms;build-tools'
-      
-      - name: Cache Gradle
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('android/*.gradle*', 'android/app/*.gradle*') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
-      
-      - name: Create local.properties
-        run: |
-          echo "sdk.dir=$ANDROID_HOME" > android/local.properties
+        uses: android-actions/setup-android@v2
       
       - name: Build debug APK
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon 2>&1 | tee build.log
+          ./gradlew assembleDebug --no-daemon 2>&1
 
       - name: Upload build log
         if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log
-          path: android/build.log
+        run: |
+          cat android/build.log 2>/dev/null || echo "No build log"
       
       - name: Upload APKs
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: authenticator-apk
