@@ -33,10 +33,8 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.util.UUID
 import javax.crypto.Cipher
-import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
-import javax.crypto.spec.KeyGenParameterSpec
 import java.security.KeyStore
 
 class MainActivity : AppCompatActivity() {
@@ -251,15 +249,15 @@ class MainActivity : AppCompatActivity() {
             keyStore.load(null)
             
             if (!keyStore.containsAlias("totp_key")) {
-                val kg = KeyGenerator.getInstance(
-                    KeyStore.KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore"
+                val kg = javax.crypto.KeyGenerator.getInstance(
+                    android.security.keystore.KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore"
                 )
-                val spec = KeyGenParameterSpec.Builder(
+                val spec = android.security.keystore.KeyGenParameterSpec.Builder(
                     "totp_key",
-                    KeyStore.KeyProperties.PURPOSE_ENCRYPT or KeyStore.KeyProperties.PURPOSE_DECRYPT
+                    android.security.keystore.KeyProperties.PURPOSE_ENCRYPT or android.security.keystore.KeyProperties.PURPOSE_DECRYPT
                 )
-                    .setBlockModes(KeyStore.KeyProperties.BLOCK_MODE_GCM)
-                    .setEncryptionPaddings(KeyStore.KeyProperties.ENCRYPTION_PADDING_NONE)
+                    .setBlockModes(android.security.keystore.KeyProperties.BLOCK_MODE_GCM)
+                    .setEncryptionPaddings(android.security.keystore.KeyProperties.ENCRYPTION_PADDING_NONE)
                     .setKeySize(256)
                     .build()
                 
