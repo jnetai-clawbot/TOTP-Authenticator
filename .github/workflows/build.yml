@@ -22,7 +22,9 @@ jobs:
           java-version: '17'
       
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v2
+        uses: androidsdk/setup-android@v1
+        with:
+          sdk-components: 'platform-tools;platforms;build-tools'
       
       - name: Cache Gradle
         uses: actions/cache@v3
@@ -37,18 +39,18 @@ jobs:
       - name: Create local.properties
         run: |
           echo "sdk.dir=$ANDROID_HOME" > android/local.properties
-          echo "ndk.dir=$ANDROID_NDK_HOME" >> android/local.properties
       
       - name: Build debug APK
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
-      
+          ./gradlew assembleDebug --no-daemon 2>&1 | tee build.log
+
       - name: Build release APK
+        if: success()
         run: |
           cd android
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew assembleRelease --no-daemon 2>&1 | tee -a build.log
         env:
           KEYSTORE_FILE: ${{ secrets.KEYSTORE_FILE }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -72,7 +74,7 @@ jobs:
           retention-days: 30
       
       - name: Upload to Release
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && success()
         uses: softprops/action-gh-release@v1
         with:
           files: android/app/build/outputs/apk/release/*.apk
