@@ -3,8 +3,6 @@ name: Build Android APK
 on:
   push:
     branches: [ main ]
-    paths-ignore:
-      - '**.md'
   workflow_dispatch:
 
 jobs:
@@ -12,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
       
       - name: Set up JDK
@@ -24,22 +22,13 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v2
       
-      - name: Build debug APK
+      - name: Show directory
+        run: |
+          ls -la
+          ls -la android/
+      
+      - name: Build APK
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon 2>&1
-
-      - name: Upload build log
-        if: failure()
-        run: |
-          cat android/build.log 2>/dev/null || echo "No build log"
-      
-      - name: Upload APKs
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: authenticator-apk
-          path: |
-            android/app/build/outputs/apk/debug/*.apk
-          retention-days: 30
+          ./gradlew clean assembleDebug --stacktrace 2>&1 | tail -100
