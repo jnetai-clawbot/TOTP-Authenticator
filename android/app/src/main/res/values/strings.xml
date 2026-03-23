@@ -6,6 +6,7 @@
     <string name="sign_in_with_google">Sign in with Google</string>
     <string name="google_account">Google Account</string>
     <string name="sign_out">Sign Out</string>
+    <string name="signed_in_as">Signed in as %1$s</string>
     
     <!-- Sites -->
     <string name="add_site">Add Site</string>

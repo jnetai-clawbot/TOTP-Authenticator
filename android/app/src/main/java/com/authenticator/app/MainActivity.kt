@@ -3,6 +3,7 @@ package com.authenticator.app
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.util.Base64
@@ -23,6 +24,10 @@ import com.authenticator.app.databinding.DialogEditSiteBinding
 import com.authenticator.app.db.Site
 import com.authenticator.app.db.SiteDatabase
 import com.authenticator.app.totp.TOTPGenerator
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInClient
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.Scope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -43,9 +48,27 @@ class MainActivity : AppCompatActivity() {
     private lateinit var database: SiteDatabase
     private lateinit var totpGenerator: TOTPGenerator
     private lateinit var adapter: SitesAdapter
+    private lateinit var googleSignInClient: GoogleSignInClient
 
     private var currentCodes = mutableMapOf<String, Pair<String, Int>>()
     private var isRefreshing = false
+    private var signedInEmail: String? = null
+    
+    private val googleSignInLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+        task.addOnCompleteListener { accountTask ->
+            if (accountTask.isSuccessful) {
+                val account = accountTask.result
+                signedInEmail = account.email
+                Toast.makeText(this, "Signed in as ${account.email}", Toast.LENGTH_SHORT).show()
+                loadSites()
+            } else {
+                Toast.makeText(this, "Google Sign-In failed", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
     
     private val importFileLauncher = registerForActivityResult(
         ActivityResultContracts.GetContent()
@@ -63,12 +86,40 @@ class MainActivity : AppCompatActivity() {
         database = SiteDatabase.getInstance(this)
         totpGenerator = TOTPGenerator()
         
+        setupGoogleSignIn()
         setupRecyclerView()
         setupClickListeners()
         setupSwipeToDelete()
         
         loadSites()
         startCodeRefresh()
+    }
+    
+    private fun setupGoogleSignIn() {
+        val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestEmail()
+            .requestScopes(Scope("https://www.googleapis.com/auth/contacts.readonly"))
+            .build()
+        
+        googleSignInClient = GoogleSignIn.getClient(this, gso)
+        
+        // Check if already signed in
+        val account = GoogleSignIn.getLastSignedInAccount(this)
+        if (account != null) {
+            signedInEmail = account.email
+        }
+    }
+    
+    private fun signInWithGoogle() {
+        val signInIntent = googleSignInClient.signInIntent
+        googleSignInLauncher.launch(signInIntent)
+    }
+    
+    private fun signOutFromGoogle() {
+        googleSignInClient.signOut().addOnCompleteListener(this) {
+            signedInEmail = null
+            Toast.makeText(this, "Signed out", Toast.LENGTH_SHORT).show()
+        }
     }
     
     private fun setupRecyclerView() {
@@ -83,6 +134,23 @@ class MainActivity : AppCompatActivity() {
     
     private fun setupClickListeners() {
         binding.fabAddSite.setOnClickListener { showAddDialog() }
+        
+        binding.btnGoogleSignIn.setOnClickListener {
+            if (signedInEmail != null) {
+                showSignOutDialog()
+            } else {
+                signInWithGoogle()
+            }
+        }
+    }
+    
+    private fun showSignOutDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("Account")
+            .setMessage("Signed in as $signedInEmail\n\nSign out?")
+            .setPositiveButton("Sign Out") { _, _ -> signOutFromGoogle() }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
     
     private fun setupSwipeToDelete() {
@@ -104,7 +172,19 @@ class MainActivity : AppCompatActivity() {
                 adapter.submitList(sites)
                 binding.tvEmptyState.visibility = if (sites.isEmpty()) View.VISIBLE else View.GONE
                 binding.recyclerSites.visibility = if (sites.isEmpty()) View.GONE else View.VISIBLE
+                updateSignInButton()
             }
+        }
+    }
+    
+    private fun updateSignInButton() {
+        if (signedInEmail != null) {
+            binding.btnGoogleSignIn.text = "Sign Out"
+            binding.tvSignedInAs?.text = signedInEmail
+            binding.tvSignedInAs?.visibility = View.VISIBLE
+        } else {
+            binding.btnGoogleSignIn.text = "Sign in with Google"
+            binding.tvSignedInAs?.visibility = View.GONE
         }
     }
     
