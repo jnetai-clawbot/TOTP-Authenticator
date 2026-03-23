@@ -32,6 +32,12 @@ import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.util.UUID
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.KeyGenParameterSpec
+import java.security.KeyStore
 
 class MainActivity : AppCompatActivity() {
     
@@ -71,17 +77,14 @@ class MainActivity : AppCompatActivity() {
         adapter = SitesAdapter(
             onCopyClick = { site -> copyCode(site.name) },
             onEditClick = { site -> showEditDialog(site) }
-        ) { name, code, remaining ->
-            currentCodes[name] = code to remaining
-            adapter.updateCode(name, code, remaining)
-        }
+        )
         
         binding.recyclerSites.layoutManager = LinearLayoutManager(this)
         binding.recyclerSites.adapter = adapter
     }
     
     private fun setupClickListeners() {
-        binding.fabAdd.setOnClickListener { showAddDialog() }
+        binding.fabAddSite.setOnClickListener { showAddDialog() }
     }
     
     private fun setupSwipeToDelete() {
@@ -134,11 +137,9 @@ class MainActivity : AppCompatActivity() {
             }
             
             currentCodes = codes
+            adapter.updateAllCodes(codes)
             
-            withContext(Dispatchers.Main) {
-                adapter.updateAllCodes(codes)
-                isRefreshing = false
-            }
+            isRefreshing = false
         }
     }
     
@@ -159,7 +160,7 @@ class MainActivity : AppCompatActivity() {
             .setTitle("Add Site")
             .setView(dialogBinding.root)
             .setPositiveButton("Add") { _, _ ->
-                val name = dialogBinding.etSiteName.text.toString().trim()
+                val name = dialogBinding.etName.text.toString().trim()
                 val secret = dialogBinding.etSecret.text.toString().trim().uppercase().replace(" ", "")
                 val issuer = dialogBinding.etIssuer.text.toString().trim()
                 
@@ -197,7 +198,7 @@ class MainActivity : AppCompatActivity() {
     
     private fun showEditDialog(site: Site) {
         val dialogBinding = DialogEditSiteBinding.inflate(layoutInflater)
-        dialogBinding.etSiteName.setText(site.name)
+        dialogBinding.etName.setText(site.name)
         dialogBinding.etIssuer.setText(site.issuer)
         dialogBinding.switchEnabled.isChecked = site.enabled
         
@@ -205,7 +206,7 @@ class MainActivity : AppCompatActivity() {
             .setTitle("Edit Site")
             .setView(dialogBinding.root)
             .setPositiveButton("Save") { _, _ ->
-                val newName = dialogBinding.etSiteName.text.toString().trim()
+                val newName = dialogBinding.etName.text.toString().trim()
                 val newIssuer = dialogBinding.etIssuer.text.toString().trim()
                 val enabled = dialogBinding.switchEnabled.isChecked
                 updateSite(site.copy(name = newName, issuer = newIssuer, enabled = enabled))
@@ -246,29 +247,29 @@ class MainActivity : AppCompatActivity() {
     
     private fun encryptSecret(secret: String): String {
         return try {
-            val keyStore = java.security.KeyStore.getInstance("AndroidKeyStore")
+            val keyStore = KeyStore.getInstance("AndroidKeyStore")
             keyStore.load(null)
             
             if (!keyStore.containsAlias("totp_key")) {
-                val keyGenerator = java.security.KeyGenerator.getInstance(
-                    java.security.KeyStore.KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore"
+                val kg = KeyGenerator.getInstance(
+                    KeyStore.KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore"
                 )
-                val spec = android.security.keystore.KeyGenParameterSpec.Builder(
+                val spec = KeyGenParameterSpec.Builder(
                     "totp_key",
-                    android.security.keystore.KeyProperties.PURPOSE_ENCRYPT or android.security.keystore.KeyProperties.PURPOSE_DECRYPT
+                    KeyStore.KeyProperties.PURPOSE_ENCRYPT or KeyStore.KeyProperties.PURPOSE_DECRYPT
                 )
-                    .setBlockModes(android.security.keystore.KeyProperties.BLOCK_MODE_GCM)
-                    .setEncryptionPaddings(android.security.keystore.KeyProperties.ENCRYPTION_PADDING_NONE)
+                    .setBlockModes(KeyStore.KeyProperties.BLOCK_MODE_GCM)
+                    .setEncryptionPaddings(KeyStore.KeyProperties.ENCRYPTION_PADDING_NONE)
                     .setKeySize(256)
                     .build()
                 
-                keyGenerator.init(spec)
-                keyGenerator.generateKey()
+                kg.init(spec)
+                kg.generateKey()
             }
             
-            val key = keyStore.getKey("totp_key", null) as java.security.SecretKey
-            val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, key)
+            val key: SecretKey = keyStore.getKey("totp_key", null) as SecretKey
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.ENCRYPT_MODE, key)
             
             val encrypted = cipher.doFinal(secret.toByteArray())
             val iv = cipher.iv
@@ -282,18 +283,18 @@ class MainActivity : AppCompatActivity() {
     
     private fun decryptSecret(encrypted: String): String {
         return try {
-            val keyStore = java.security.KeyStore.getInstance("AndroidKeyStore")
+            val keyStore = KeyStore.getInstance("AndroidKeyStore")
             keyStore.load(null)
             
-            val key = keyStore.getKey("totp_key", null) as? java.security.SecretKey ?: return encrypted
+            val key: SecretKey = keyStore.getKey("totp_key", null) as? SecretKey ?: return encrypted
             
             val combined = Base64.decode(encrypted, Base64.NO_WRAP)
             val iv = combined.copyOfRange(0, 12)
             val encryptedBytes = combined.copyOfRange(12, combined.size)
             
-            val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
-            val spec = javax.crypto.spec.GCMParameterSpec(128, iv)
-            cipher.init(javax.crypto.Cipher.DECRYPT_MODE, key, spec)
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            val spec = GCMParameterSpec(128, iv)
+            cipher.init(Cipher.DECRYPT_MODE, key, spec)
             
             String(cipher.doFinal(encryptedBytes))
         } catch (e: Exception) {
