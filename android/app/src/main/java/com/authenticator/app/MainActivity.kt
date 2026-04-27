@@ -211,7 +211,7 @@ class MainActivity : AppCompatActivity() {
                 showBackupRestoreDialog()
             } else {
                 googleSignInClient?.let {
-                    googleSignInLauncher.launch(it.signInIntent)
+                    signInLauncher.launch(it.signInIntent)
                 } ?: showToast("Google Sign-In not available")
             }
         } catch (e: Exception) {
