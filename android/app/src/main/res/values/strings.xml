@@ -75,7 +75,4 @@
     <!-- About -->
     <string name="about">About</string>
     <string name="about_title">About TOTP Authenticator</string>
-    <string name="about_message">TOTP Authenticator v1.1.0
-
-Made by jnetai.com</string>
 </resources>

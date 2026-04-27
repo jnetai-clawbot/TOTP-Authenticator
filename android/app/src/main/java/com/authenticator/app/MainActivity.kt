@@ -490,10 +490,31 @@ class MainActivity : AppCompatActivity() {
 
     private fun showAboutDialog() {
         try {
+            val versionName = try {
+                packageManager.getPackageInfo(packageName, 0).versionName
+            } catch (_: Exception) { "1.1.1" }
+
+            val message = "TOTP Authenticator v$versionName\n\nMade by jnetai.com"
+            val repoUrl = "https://github.com/jnetai-clawbot/TOTP-Authenticator"
+
             AlertDialog.Builder(this)
                 .setTitle(getString(com.authenticator.app.R.string.about_title))
-                .setMessage(getString(com.authenticator.app.R.string.about_message))
+                .setMessage(message)
                 .setPositiveButton("OK", null)
+                .setNeutralButton("Share") { _, _ ->
+                    try {
+                        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        val clip = ClipData.newPlainText("TOTP Authenticator", repoUrl)
+                        clipboard.setPrimaryClip(clip)
+                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_TEXT, "Check out TOTP Authenticator: $repoUrl")
+                        }
+                        startActivity(Intent.createChooser(shareIntent, "Share TOTP Authenticator"))
+                    } catch (e: Exception) {
+                        logError("shareApp", e)
+                    }
+                }
                 .show()
         } catch (e: Exception) {
             logError("showAboutDialog", e)
