@@ -33,6 +33,7 @@ import com.google.android.gms.auth.api.signin.GoogleSignInClient
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.Scope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -185,8 +186,54 @@ class MainActivity : AppCompatActivity() {
             binding.fabAddSite.setOnClickListener { showAddDialog() }
             binding.btnGoogleSignIn.setOnClickListener { performGoogleSignIn() }
             updateGoogleSignInCard()
+
+            // Search functionality
+            var searchTimer: Job? = null
+            binding.etSearch.addTextChangedListener(object : android.text.TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+                override fun afterTextChanged(s: android.text.Editable?) {
+                    searchTimer?.cancel()
+                    searchTimer = lifecycleScope.launch {
+                        kotlinx.coroutines.delay(300) // debounce
+                        val query = s?.toString()?.trim()?.lowercase() ?: ""
+                        binding.btnClearSearch.visibility = if (query.isNotEmpty()) android.view.View.VISIBLE else android.view.View.GONE
+                        filterSites(query)
+                    }
+                }
+            })
+            binding.btnClearSearch.setOnClickListener {
+                binding.etSearch.text?.clear()
+            }
+            // Show search bar if there are sites
+            showSearchIfNeeded()
         } catch (e: Exception) {
             logError("setupClickListeners", e)
+        }
+    }
+
+    private var allSites: List<Site> = emptyList()
+
+    private fun showSearchIfNeeded() {
+        try {
+            binding.cardSearch.visibility = if (allSites.isNotEmpty()) android.view.View.VISIBLE else android.view.View.GONE
+        } catch (e: Exception) {
+            logError("showSearchIfNeeded", e)
+        }
+    }
+
+    private fun filterSites(query: String) {
+        try {
+            val filtered = if (query.isEmpty()) allSites
+            else allSites.filter { it.name.lowercase().contains(query) || it.issuer.lowercase().contains(query) }
+            adapter.submitList(filtered)
+            binding.tvEmptyState.visibility = if (filtered.isEmpty() && allSites.isNotEmpty())
+                android.view.View.VISIBLE else android.view.View.GONE
+            if (filtered.isEmpty() && allSites.isNotEmpty()) {
+                binding.tvEmptyState.text = "No sites matching \"$query\""
+            }
+        } catch (e: Exception) {
+            logError("filterSites", e)
         }
     }
 
@@ -246,11 +293,16 @@ class MainActivity : AppCompatActivity() {
             lifecycleScope.launch(Dispatchers.IO) {
                 try {
                     val sites = database.siteDao().getAll()
+                    allSites = sites
                     withContext(Dispatchers.Main) {
                         try {
                             adapter.submitList(sites)
                             binding.tvEmptyState.visibility = if (sites.isEmpty()) View.VISIBLE else View.GONE
                             binding.recyclerSites.visibility = if (sites.isEmpty()) View.GONE else View.VISIBLE
+                            showSearchIfNeeded()
+                            // Reload search if there's an active query
+                            val currentQuery = binding.etSearch.text?.trim().toString()
+                            if (currentQuery.isNotEmpty()) filterSites(currentQuery.lowercase())
                         } catch (e: Exception) {
                             logError("loadSites UI", e)
                         }
@@ -525,10 +577,15 @@ class MainActivity : AppCompatActivity() {
         try {
             val versionName = try {
                 packageManager.getPackageInfo(packageName, 0).versionName
-            } catch (_: Exception) { "1.1.1" }
+            } catch (_: Exception) { "1.1.3" }
 
-            val message = "TOTP Authenticator v$versionName\n\nMade by jnetai.com"
+            val versionCode = try {
+                packageManager.getPackageInfo(packageName, 0).versionCode.toString()
+            } catch (_: Exception) { "" }
+
+            val message = "TOTP Authenticator\nVersion $versionName (build $versionCode)\n\nMade by jnetai.com"
             val repoUrl = "https://github.com/jnetai-clawbot/TOTP-Authenticator"
+            val siteUrl = "https://jnetai.com"
 
             AlertDialog.Builder(this)
                 .setTitle(getString(com.authenticator.app.R.string.about_title))
@@ -546,6 +603,14 @@ class MainActivity : AppCompatActivity() {
                         startActivity(Intent.createChooser(shareIntent, "Share TOTP Authenticator"))
                     } catch (e: Exception) {
                         logError("shareApp", e)
+                    }
+                }
+                .setNegativeButton("Visit") { _, _ ->
+                    try {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(siteUrl))
+                        startActivity(intent)
+                    } catch (e: Exception) {
+                        logError("visitSite", e)
                     }
                 }
                 .show()

@@ -46,21 +46,21 @@ jobs:
       
       - name: Rename APKs
         run: |
-          cp android/app/build/outputs/apk/debug/app-debug.apk totp-debug.apk
-          cp android/app/build/outputs/apk/release/app-release.apk totp-release.apk
-          ls -lh totp-*.apk
+          cp android/app/build/outputs/apk/debug/app-debug.apk TOTP-Authenticator-debug.apk
+          cp android/app/build/outputs/apk/release/app-release.apk TOTP-Authenticator.apk
+          ls -lh TOTP-Authenticator*.apk
       
       - name: Upload debug APK (artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: totp-debug
-          path: totp-debug.apk
+          name: TOTP-Authenticator-debug
+          path: TOTP-Authenticator-debug.apk
       
       - name: Upload release APK (artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: totp-release
-          path: totp-release.apk
+          name: TOTP-Authenticator
+          path: TOTP-Authenticator.apk
       
       - name: Create GitHub Release
         env:
@@ -75,10 +75,10 @@ jobs:
           gh release create "$TAG" \
             --title "TOTP Authenticator $VERSION" \
             --notes "TOTP Authenticator $VERSION
-          - Debug: totp-debug.apk
-          - Release (signed): totp-release.apk
+          - Debug: TOTP-Authenticator-debug.apk
+          - Release (signed): TOTP-Authenticator.apk
 
           Target devices: Samsung S7, S8, Pixel 6, Pixel 7 (minSdk 24)
           Features: Google Sign-In, QR scanning, encrypted storage, dark theme" \
-            totp-debug.apk totp-release.apk || \
-          gh release upload "$TAG" totp-debug.apk totp-release.apk --clobber
+            TOTP-Authenticator-debug.apk TOTP-Authenticator.apk || \
+          gh release upload "$TAG" TOTP-Authenticator-debug.apk TOTP-Authenticator.apk --clobber
