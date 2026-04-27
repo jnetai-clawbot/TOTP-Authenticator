@@ -22,6 +22,11 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v2
       
+      - name: Import keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > android/app/keystore.jks
+          echo "Keystore imported"
+      
       - name: Build debug APK
         run: |
           cd android
@@ -29,6 +34,9 @@ jobs:
           ./gradlew assembleDebug 2>&1
       
       - name: Build release APK
+        env:
+          KEYSTORE_PASSWORD: "${{ secrets.KEYSTORE_PASSWORD }}"
+          KEY_PASSWORD: "${{ secrets.KEY_PASSWORD }}"
         run: |
           cd android
           ./gradlew assembleRelease 2>&1
