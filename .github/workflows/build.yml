@@ -64,21 +64,27 @@ jobs:
       
       - name: Create GitHub Release
         id: create_release
-        uses: softprops/action-gh-release@v2
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: v${{ github.run_number }}
-          name: "TOTP Authenticator v${{ github.run_number }}"
-          body: |
-            ## TOTP Authenticator v${{ github.run_number }}
-
-            - Debug: `totp-debug.apk`
-            - Release (signed): `totp-release.apk`
-
-            **Target devices:** Samsung S7, S8, Pixel 6, Pixel 7 (minSdk 24)
-            **Features:** Google Sign-In, QR scanning, encrypted storage, dark theme
-          files: |
-            totp-debug.apk
-            totp-release.apk
-          generate_release_notes: false
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="v${{ github.run_number }}"
+          TAG="totp-$VERSION"
+          
+          # Check if release already exists
+          EXISTING=$(gh release view "$TAG" --json tagName 2>/dev/null || echo "")
+          
+          if [ -n "$EXISTING" ]; then
+            echo "Release $TAG already exists, uploading assets..."
+            gh release upload "$TAG" totp-debug.apk totp-release.apk --clobber
+          else
+            echo "Creating release $TAG..."
+            gh release create "$TAG" \
+              --title "TOTP Authenticator $VERSION" \
+              --notes "TOTP Authenticator $VERSION
+          - Debug: \`totp-debug.apk\`
+          - Release (signed): \`totp-release.apk\`
+          
+          **Target devices:** Samsung S7, S8, Pixel 6, Pixel 7 (minSdk 24)
+          **Features:** Google Sign-In, QR scanning, encrypted storage, dark theme" \
+              totp-debug.apk totp-release.apk
+          fi
