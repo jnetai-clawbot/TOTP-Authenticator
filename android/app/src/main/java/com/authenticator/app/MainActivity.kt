@@ -157,7 +157,7 @@ class MainActivity : AppCompatActivity() {
         val swipeHandler = object : ItemTouchHelper.SimpleCallback(0, ItemTouchHelper.LEFT) {
             override fun onMove(r: RecyclerView, v: RecyclerView.ViewHolder, t: RecyclerView.ViewHolder) = false
             override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
-                val position = viewHolder.adapterPosition
+                val position = viewHolder.bindingAdapterPosition
                 val site = adapter.currentList[position]
                 showDeleteConfirmation(site)
             }
