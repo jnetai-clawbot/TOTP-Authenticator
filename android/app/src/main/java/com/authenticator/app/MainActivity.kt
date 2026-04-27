@@ -1,6 +1,5 @@
 package com.authenticator.app
 
-import android.accounts.AccountManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -11,8 +10,6 @@ import android.util.Base64
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
-import android.view.ViewGroup
-import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -27,11 +24,6 @@ import com.authenticator.app.databinding.DialogEditSiteBinding
 import com.authenticator.app.db.Site
 import com.authenticator.app.db.SiteDatabase
 import com.authenticator.app.totp.TOTPGenerator
-import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInAccount
-import com.google.android.gms.auth.api.signin.GoogleSignInClient
-import com.google.android.gms.auth.api.signin.GoogleSignInOptions
-import com.google.android.gms.common.api.Scope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -62,8 +54,12 @@ class MainActivity : AppCompatActivity() {
     // Master password passed from LoginActivity
     private var masterPassword: String = ""
 
-    private var googleSignInClient: GoogleSignInClient? = null
     private var currentAccountName: String? = null
+    private var currentAccessToken: String? = null
+
+    private companion object {
+        private const val DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file"
+    }
     
     private val importFileLauncher = registerForActivityResult(
         ActivityResultContracts.GetContent()
@@ -73,17 +69,16 @@ class MainActivity : AppCompatActivity() {
         ActivityResultContracts.CreateDocument("application/json")
     ) { uri: Uri? -> uri?.let { safeCall("export") { exportToUri(it) } } }
 
-    private val signInLauncher = registerForActivityResult(
+    private val accountPickerLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        safeCall("signInResult") {
-            val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
-            val account = task.result
-            if (account != null) {
-                currentAccountName = account.displayName ?: account.email ?: "Google Account"
+        safeCall("accountPickerResult") {
+            val accountEmail = result.data?.getStringExtra(android.accounts.AccountManager.KEY_ACCOUNT_NAME)
+            if (accountEmail != null) {
+                currentAccountName = accountEmail
+                getDriveToken(accountEmail)
                 updateGoogleSignInCard()
-                showToast("Signed in as ${account.email}")
-                // Show backup/restore options after sign-in
+                showToast("Signed in as $accountEmail")
                 showBackupRestoreDialog()
             } else {
                 showToast("Sign in cancelled")
@@ -104,7 +99,7 @@ class MainActivity : AppCompatActivity() {
             totpGenerator = TOTPGenerator()
             driveBackupManager = DriveBackupManager(this)
 
-            initGoogleSignIn()
+            initAccountManager()
 
             setupRecyclerView()
             setupClickListeners()
@@ -119,22 +114,41 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun initGoogleSignIn() {
+    private fun initAccountManager() {
         try {
-            val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-                .requestScopes(Scope("https://www.googleapis.com/auth/drive.file"))
-                .requestEmail()
-                .build()
-            googleSignInClient = GoogleSignIn.getClient(this, gso)
-
-            // Check if already signed in
-            val lastAccount = GoogleSignIn.getLastSignedInAccount(this)
-            if (lastAccount != null) {
-                currentAccountName = lastAccount.displayName ?: lastAccount.email ?: "Google Account"
+            val accounts = android.accounts.AccountManager.get(this)
+                .getAccountsByType("com.google")
+            if (accounts.isNotEmpty()) {
+                currentAccountName = accounts[0].name
+                getDriveToken(currentAccountName!!)
                 updateGoogleSignInCard()
             }
         } catch (e: Exception) {
-            logError("initGoogleSignIn", e)
+            logError("initAccountManager", e)
+        }
+    }
+
+    private fun getDriveToken(accountEmail: String) {
+        try {
+            val accountManager = android.accounts.AccountManager.get(this)
+            val account = android.accounts.Account(accountEmail, "com.google")
+            accountManager.getAuthToken(account, DRIVE_SCOPE, null, this,
+                { future ->
+                    try {
+                        val bundle = future.result
+                        currentAccessToken = bundle.getString(android.accounts.AccountManager.KEY_AUTHTOKEN)
+                        if (currentAccessToken != null) {
+                            showToast("Drive access granted")
+                        }
+                    } catch (e: Exception) {
+                        logError("getAuthToken future", e)
+                        showToast("Failed to get Drive access: ${e.message}")
+                    }
+                },
+                null
+            )
+        } catch (e: Exception) {
+            logError("getDriveToken", e)
         }
     }
     
@@ -254,12 +268,15 @@ class MainActivity : AppCompatActivity() {
     private fun performGoogleSignIn() {
         try {
             if (currentAccountName != null) {
-                // Show settings dialog instead of signing out immediately
                 showBackupRestoreDialog()
             } else {
-                googleSignInClient?.let {
-                    signInLauncher.launch(it.signInIntent)
-                } ?: showToast("Google Sign-In not available")
+                // Show Google account picker (no Firebase needed)
+                val intent = android.accounts.AccountManager.newChooseAccountIntent(
+                    null, null, arrayOf("com.google"),
+                    false, null,
+                    null, null, null
+                )
+                accountPickerLauncher.launch(intent)
             }
         } catch (e: Exception) {
             logError("performGoogleSignIn", e)
@@ -665,14 +682,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun signIn() {
         try {
-            googleSignInClient?.signOut()?.addOnCompleteListener {
-                val signInIntent = googleSignInClient?.signInIntent
-                if (signInIntent != null) {
-                    signInLauncher.launch(signInIntent)
-                } else {
-                    showToast("Google Sign-In not available")
-                }
-            }
+            // Show Google account picker
+            val intent = android.accounts.AccountManager.newChooseAccountIntent(
+                null, null, arrayOf("com.google"),
+                false, null, null, null, null
+            )
+            accountPickerLauncher.launch(intent)
         } catch (e: Exception) {
             logError("signIn", e)
             showToast("Sign in failed: ${e.message}")
@@ -681,11 +696,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun signOut() {
         try {
-            googleSignInClient?.signOut()?.addOnCompleteListener {
-                currentAccountName = null
-                updateGoogleSignInCard()
-                showToast("Signed out")
-            }
+            currentAccountName = null
+            currentAccessToken = null
+            updateGoogleSignInCard()
+            showToast("Signed out")
         } catch (e: Exception) {
             logError("signOut", e)
         }
@@ -716,8 +730,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val account = GoogleSignIn.getLastSignedInAccount(this)
-        if (account == null) {
+        if (currentAccountName == null) {
             showToast("Please sign in to Google first")
             signIn()
             return
@@ -730,16 +743,22 @@ class MainActivity : AppCompatActivity() {
                 // Build encrypted backup JSON
                 val encryptedBackup = driveBackupManager.buildBackupJson(masterPassword)
 
-                // Get access token
-                val accessToken = account.account?.let { acc ->
-                    val am = getSystemService(Context.ACCOUNT_SERVICE) as AccountManager
-                    val future = am.getAuthToken(acc, "oauth2:https://www.googleapis.com/auth/drive.file", null, false, null, null)
-                    val bundle = future.result
-                    bundle.getString(AccountManager.KEY_AUTHTOKEN)
+                // Get access token for current account
+                val accessToken = currentAccountName?.let { email ->
+                    try {
+                        val am = getSystemService(Context.ACCOUNT_SERVICE) as android.accounts.AccountManager
+                        val account = android.accounts.Account(email, "com.google")
+                        val future = am.getAuthToken(account, "oauth2:https://www.googleapis.com/auth/drive.file", null, false, null, null)
+                        val bundle = future.result
+                        bundle.getString(android.accounts.AccountManager.KEY_AUTHTOKEN)
+                    } catch (e: Exception) {
+                        logError("getBackupToken", e)
+                        null
+                    }
                 }
 
                 if (accessToken == null) {
-                    withContext(Dispatchers.Main) { showToast("Failed to get access token") }
+                    withContext(Dispatchers.Main) { showToast("Failed to get Drive access token") }
                     return@launch
                 }
 
@@ -777,8 +796,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val account = GoogleSignIn.getLastSignedInAccount(this)
-        if (account == null) {
+        if (currentAccountName == null) {
             showToast("Please sign in to Google first")
             signIn()
             return
@@ -788,11 +806,17 @@ class MainActivity : AppCompatActivity() {
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val accessToken = account.account?.let { acc ->
-                    val am = getSystemService(Context.ACCOUNT_SERVICE) as AccountManager
-                    val future = am.getAuthToken(acc, "oauth2:https://www.googleapis.com/auth/drive.file", null, false, null, null)
-                    val bundle = future.result
-                    bundle.getString(AccountManager.KEY_AUTHTOKEN)
+                val accessToken = currentAccountName?.let { email ->
+                    try {
+                        val am = getSystemService(Context.ACCOUNT_SERVICE) as android.accounts.AccountManager
+                        val account = android.accounts.Account(email, "com.google")
+                        val future = am.getAuthToken(account, "oauth2:https://www.googleapis.com/auth/drive.file", null, false, null, null)
+                        val bundle = future.result
+                        bundle.getString(android.accounts.AccountManager.KEY_AUTHTOKEN)
+                    } catch (e: Exception) {
+                        logError("getRestoreToken", e)
+                        null
+                    }
                 }
 
                 if (accessToken == null) {
