@@ -80,6 +80,7 @@ class MainActivity : AppCompatActivity() {
             val account = task.result
             if (account != null) {
                 currentAccountName = account.displayName ?: account.email ?: "Google Account"
+                updateGoogleSignInCard()
                 showToast("Signed in as ${account.email}")
                 // Show backup/restore options after sign-in
                 showBackupRestoreDialog()
@@ -129,6 +130,7 @@ class MainActivity : AppCompatActivity() {
             val lastAccount = GoogleSignIn.getLastSignedInAccount(this)
             if (lastAccount != null) {
                 currentAccountName = lastAccount.displayName ?: lastAccount.email ?: "Google Account"
+                updateGoogleSignInCard()
             }
         } catch (e: Exception) {
             logError("initGoogleSignIn", e)
@@ -181,8 +183,39 @@ class MainActivity : AppCompatActivity() {
     private fun setupClickListeners() {
         try {
             binding.fabAddSite.setOnClickListener { showAddDialog() }
+            binding.btnGoogleSignIn.setOnClickListener { performGoogleSignIn() }
+            updateGoogleSignInCard()
         } catch (e: Exception) {
             logError("setupClickListeners", e)
+        }
+    }
+
+    private fun updateGoogleSignInCard() {
+        try {
+            if (currentAccountName != null) {
+                binding.tvSignedInAs.text = currentAccountName
+                binding.btnGoogleSignIn.text = getString(com.authenticator.app.R.string.sign_out_google)
+            } else {
+                binding.tvSignedInAs.text = "Not signed in"
+                binding.btnGoogleSignIn.text = getString(com.authenticator.app.R.string.sign_in_google)
+            }
+        } catch (e: Exception) {
+            logError("updateGoogleSignInCard", e)
+        }
+    }
+
+    private fun performGoogleSignIn() {
+        try {
+            if (currentAccountName != null) {
+                // Show settings dialog instead of signing out immediately
+                showBackupRestoreDialog()
+            } else {
+                googleSignInClient?.let {
+                    googleSignInLauncher.launch(it.signInIntent)
+                } ?: showToast("Google Sign-In not available")
+            }
+        } catch (e: Exception) {
+            logError("performGoogleSignIn", e)
         }
     }
     
@@ -585,6 +618,7 @@ class MainActivity : AppCompatActivity() {
         try {
             googleSignInClient?.signOut()?.addOnCompleteListener {
                 currentAccountName = null
+                updateGoogleSignInCard()
                 showToast("Signed out")
             }
         } catch (e: Exception) {
