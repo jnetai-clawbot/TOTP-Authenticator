@@ -1,5 +1,6 @@
 package com.authenticator.app
 
+import android.accounts.AccountManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -10,6 +11,8 @@ import android.util.Base64
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import android.view.ViewGroup
+import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -24,6 +27,11 @@ import com.authenticator.app.databinding.DialogEditSiteBinding
 import com.authenticator.app.db.Site
 import com.authenticator.app.db.SiteDatabase
 import com.authenticator.app.totp.TOTPGenerator
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInAccount
+import com.google.android.gms.auth.api.signin.GoogleSignInClient
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.Scope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -45,9 +53,16 @@ class MainActivity : AppCompatActivity() {
     private lateinit var database: SiteDatabase
     private lateinit var totpGenerator: TOTPGenerator
     private lateinit var adapter: SitesAdapter
+    private lateinit var driveBackupManager: DriveBackupManager
 
     private var currentCodes = mutableMapOf<String, Pair<String, Int>>()
     private var isRefreshing = false
+
+    // Master password passed from LoginActivity
+    private var masterPassword: String = ""
+
+    private var googleSignInClient: GoogleSignInClient? = null
+    private var currentAccountName: String? = null
     
     private val importFileLauncher = registerForActivityResult(
         ActivityResultContracts.GetContent()
@@ -57,25 +72,66 @@ class MainActivity : AppCompatActivity() {
         ActivityResultContracts.CreateDocument("application/json")
     ) { uri: Uri? -> uri?.let { safeCall("export") { exportToUri(it) } } }
 
+    private val signInLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        safeCall("signInResult") {
+            val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+            val account = task.result
+            if (account != null) {
+                currentAccountName = account.displayName ?: account.email ?: "Google Account"
+                showToast("Signed in as ${account.email}")
+                // Show backup/restore options after sign-in
+                showBackupRestoreDialog()
+            } else {
+                showToast("Sign in cancelled")
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         try {
             super.onCreate(savedInstanceState)
             binding = ActivityMainBinding.inflate(layoutInflater)
             setContentView(binding.root)
-            
+
+            // Retrieve master password from LoginActivity
+            masterPassword = intent.getStringExtra("master_password") ?: ""
+
             database = SiteDatabase.getInstance(this)
             totpGenerator = TOTPGenerator()
-            
+            driveBackupManager = DriveBackupManager(this)
+
+            initGoogleSignIn()
+
             setupRecyclerView()
             setupClickListeners()
             setupSwipeToDelete()
-            
+
             loadSites()
             startCodeRefresh()
         } catch (e: Exception) {
             logError("onCreate", e)
             showToast("App failed to start: ${e.message}")
             finish()
+        }
+    }
+
+    private fun initGoogleSignIn() {
+        try {
+            val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                .requestScopes(Scope("https://www.googleapis.com/auth/drive.file"))
+                .requestEmail()
+                .build()
+            googleSignInClient = GoogleSignIn.getClient(this, gso)
+
+            // Check if already signed in
+            val lastAccount = GoogleSignIn.getLastSignedInAccount(this)
+            if (lastAccount != null) {
+                currentAccountName = lastAccount.displayName ?: lastAccount.email ?: "Google Account"
+            }
+        } catch (e: Exception) {
+            logError("initGoogleSignIn", e)
         }
     }
     
@@ -241,9 +297,9 @@ class MainActivity : AppCompatActivity() {
         try {
             val dialogBinding = DialogAddSiteBinding.inflate(layoutInflater)
             AlertDialog.Builder(this)
-                .setTitle("Add Site")
+                .setTitle(getString(com.authenticator.app.R.string.add_site))
                 .setView(dialogBinding.root)
-                .setPositiveButton("Add") { _, _ ->
+                .setPositiveButton(getString(com.authenticator.app.R.string.add_site)) { _, _ ->
                     safeCall("addSiteDialog") {
                         val name = dialogBinding.etName.text.toString().trim()
                         val secret = dialogBinding.etSecret.text.toString().uppercase().replace(" ", "")
@@ -251,11 +307,11 @@ class MainActivity : AppCompatActivity() {
                         if (name.isNotEmpty() && secret.isNotEmpty()) {
                             addSite(name, secret, issuer)
                         } else {
-                            showToast("Name and secret required")
+                            showToast(getString(com.authenticator.app.R.string.error_password_required))
                         }
                     }
                 }
-                .setNegativeButton("Cancel", null)
+                .setNegativeButton(getString(com.authenticator.app.R.string.cancel), null)
                 .show()
         } catch (e: Exception) {
             logError("showAddDialog", e)
@@ -292,9 +348,9 @@ class MainActivity : AppCompatActivity() {
             dialogBinding.switchEnabled.isChecked = site.enabled
             
             AlertDialog.Builder(this)
-                .setTitle("Edit Site")
+                .setTitle(getString(com.authenticator.app.R.string.edit))
                 .setView(dialogBinding.root)
-                .setPositiveButton("Save") { _, _ ->
+                .setPositiveButton(getString(com.authenticator.app.R.string.save)) { _, _ ->
                     safeCall("editSiteSave") {
                         val newName = dialogBinding.etName.text.toString().trim()
                         val newIssuer = dialogBinding.etIssuer.text.toString().trim()
@@ -302,7 +358,7 @@ class MainActivity : AppCompatActivity() {
                         updateSite(site.copy(name = newName, issuer = newIssuer, enabled = enabled))
                     }
                 }
-                .setNegativeButton("Cancel", null)
+                .setNegativeButton(getString(com.authenticator.app.R.string.cancel), null)
                 .show()
         } catch (e: Exception) {
             logError("showEditDialog", e)
@@ -323,10 +379,10 @@ class MainActivity : AppCompatActivity() {
     private fun showDeleteConfirmation(site: Site) {
         try {
             AlertDialog.Builder(this)
-                .setTitle("Delete Site")
-                .setMessage("Delete ${site.name}?")
-                .setPositiveButton("Delete") { _, _ -> safeCall("deleteSite") { deleteSite(site) } }
-                .setNegativeButton("Cancel") { _, _ -> loadSites() }
+                .setTitle(getString(com.authenticator.app.R.string.delete))
+                .setMessage(String.format(getString(com.authenticator.app.R.string.delete_site_message), site.name))
+                .setPositiveButton(getString(com.authenticator.app.R.string.delete)) { _, _ -> safeCall("deleteSite") { deleteSite(site) } }
+                .setNegativeButton(getString(com.authenticator.app.R.string.cancel)) { _, _ -> loadSites() }
                 .setOnCancelListener { loadSites() }
                 .show()
         } catch (e: Exception) {
@@ -419,11 +475,318 @@ class MainActivity : AppCompatActivity() {
             when (item.itemId) {
                 com.authenticator.app.R.id.action_import -> { importFileLauncher.launch("application/json"); true }
                 com.authenticator.app.R.id.action_export -> { exportFileLauncher.launch("totp_sites.json"); true }
+                com.authenticator.app.R.id.action_backup -> { performBackup(); true }
+                com.authenticator.app.R.id.action_settings -> { showSettingsDialog(); true }
                 else -> super.onOptionsItemSelected(item)
             }
         } catch (e: Exception) {
             logError("onOptionsItemSelected", e)
             false
+        }
+    }
+    
+    // ---- Settings Dialog ----
+
+    private fun showSettingsDialog() {
+        try {
+            val items = mutableListOf<String>()
+            val actions = mutableListOf<() -> Unit>()
+
+            // Sign in / account status
+            if (currentAccountName != null) {
+                items.add(getString(com.authenticator.app.R.string.signed_in_as, currentAccountName))
+                actions.add {} // no-op for info item
+
+                items.add(getString(com.authenticator.app.R.string.backup_now))
+                actions.add { performBackup() }
+
+                items.add(getString(com.authenticator.app.R.string.restore_from_backup))
+                actions.add { confirmAndRestore() }
+
+                items.add(getString(com.authenticator.app.R.string.sign_out_google))
+                actions.add { signOut() }
+            } else {
+                items.add(getString(com.authenticator.app.R.string.sign_in_google))
+                actions.add { signIn() }
+            }
+
+            items.add(getString(com.authenticator.app.R.string.change_password))
+            actions.add { showChangePasswordDialog() }
+
+            AlertDialog.Builder(this)
+                .setTitle(getString(com.authenticator.app.R.string.settings))
+                .setItems(items.toTypedArray()) { _, which ->
+                    if (which < actions.size) {
+                        safeCall("settingsDialog") { actions[which].invoke() }
+                    }
+                }
+                .setPositiveButton(getString(com.authenticator.app.R.string.cancel), null)
+                .show()
+        } catch (e: Exception) {
+            logError("showSettingsDialog", e)
+        }
+    }
+
+    // ---- Google Sign-In / Sign-Out ----
+
+    private fun signIn() {
+        try {
+            googleSignInClient?.signOut()?.addOnCompleteListener {
+                val signInIntent = googleSignInClient?.signInIntent
+                if (signInIntent != null) {
+                    signInLauncher.launch(signInIntent)
+                } else {
+                    showToast("Google Sign-In not available")
+                }
+            }
+        } catch (e: Exception) {
+            logError("signIn", e)
+            showToast("Sign in failed: ${e.message}")
+        }
+    }
+
+    private fun signOut() {
+        try {
+            googleSignInClient?.signOut()?.addOnCompleteListener {
+                currentAccountName = null
+                showToast("Signed out")
+            }
+        } catch (e: Exception) {
+            logError("signOut", e)
+        }
+    }
+
+    // ---- Backup / Restore ----
+
+    private fun showBackupRestoreDialog() {
+        val items = arrayOf(
+            getString(com.authenticator.app.R.string.backup_now),
+            getString(com.authenticator.app.R.string.restore_from_backup)
+        )
+        AlertDialog.Builder(this)
+            .setTitle(getString(com.authenticator.app.R.string.cloud_backup))
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> performBackup()
+                    1 -> confirmAndRestore()
+                }
+            }
+            .setNegativeButton(getString(com.authenticator.app.R.string.cancel), null)
+            .show()
+    }
+
+    private fun performBackup() {
+        if (masterPassword.isEmpty()) {
+            showToast("No master password set")
+            return
+        }
+
+        val account = GoogleSignIn.getLastSignedInAccount(this)
+        if (account == null) {
+            showToast("Please sign in to Google first")
+            signIn()
+            return
+        }
+
+        showToast("Backing up...")
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                // Build encrypted backup JSON
+                val encryptedBackup = driveBackupManager.buildBackupJson(masterPassword)
+
+                // Get access token
+                val accessToken = account.account?.let { acc ->
+                    val am = getSystemService(Context.ACCOUNT_SERVICE) as AccountManager
+                    val future = am.getAuthToken(acc, "oauth2:https://www.googleapis.com/auth/drive.file", null, false, null, null)
+                    val bundle = future.result
+                    bundle.getString(AccountManager.KEY_AUTHTOKEN)
+                }
+
+                if (accessToken == null) {
+                    withContext(Dispatchers.Main) { showToast("Failed to get access token") }
+                    return@launch
+                }
+
+                val success = driveBackupManager.uploadToDrive(accessToken, encryptedBackup)
+                withContext(Dispatchers.Main) {
+                    if (success) {
+                        showToast(getString(com.authenticator.app.R.string.backup_success))
+                    } else {
+                        showToast(getString(com.authenticator.app.R.string.backup_failed))
+                    }
+                }
+            } catch (e: Exception) {
+                logError("backup", e)
+                withContext(Dispatchers.Main) {
+                    showToast("Backup failed: ${e.message}")
+                }
+            }
+        }
+    }
+
+    private fun confirmAndRestore() {
+        AlertDialog.Builder(this)
+            .setTitle(getString(com.authenticator.app.R.string.confirm_restore_title))
+            .setMessage(getString(com.authenticator.app.R.string.confirm_restore_message))
+            .setPositiveButton(getString(com.authenticator.app.R.string.confirm)) { _, _ ->
+                performRestore()
+            }
+            .setNegativeButton(getString(com.authenticator.app.R.string.cancel), null)
+            .show()
+    }
+
+    private fun performRestore() {
+        if (masterPassword.isEmpty()) {
+            showToast("No master password set")
+            return
+        }
+
+        val account = GoogleSignIn.getLastSignedInAccount(this)
+        if (account == null) {
+            showToast("Please sign in to Google first")
+            signIn()
+            return
+        }
+
+        showToast("Restoring...")
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val accessToken = account.account?.let { acc ->
+                    val am = getSystemService(Context.ACCOUNT_SERVICE) as AccountManager
+                    val future = am.getAuthToken(acc, "oauth2:https://www.googleapis.com/auth/drive.file", null, false, null, null)
+                    val bundle = future.result
+                    bundle.getString(AccountManager.KEY_AUTHTOKEN)
+                }
+
+                if (accessToken == null) {
+                    withContext(Dispatchers.Main) { showToast("Failed to get access token") }
+                    return@launch
+                }
+
+                val encryptedContent = driveBackupManager.downloadFromDrive(accessToken)
+                if (encryptedContent == null) {
+                    withContext(Dispatchers.Main) {
+                        showToast(getString(com.authenticator.app.R.string.no_backup_found))
+                    }
+                    return@launch
+                }
+
+                val count = driveBackupManager.restoreFromBackup(masterPassword, encryptedContent)
+
+                withContext(Dispatchers.Main) {
+                    loadSites()
+                    showToast(String.format(getString(com.authenticator.app.R.string.restore_success), count))
+                }
+            } catch (e: Exception) {
+                logError("restore", e)
+                withContext(Dispatchers.Main) {
+                    showToast(getString(com.authenticator.app.R.string.restore_failed, e.message))
+                }
+            }
+        }
+    }
+
+    // ---- Change Password ----
+
+    // ---- Change Password ----
+
+    private fun showChangePasswordDialog() {
+        try {
+            val builder = AlertDialog.Builder(this)
+                .setTitle(getString(com.authenticator.app.R.string.change_password_title))
+
+            val container = LinearLayout(this)
+            container.orientation = LinearLayout.VERTICAL
+            container.setPadding(48, 24, 48, 24)
+
+            val currentField = com.google.android.material.textfield.TextInputLayout(
+                this,
+                null,
+                com.google.android.material.R.style.Widget_Material3_TextInputLayout_OutlinedBox
+            )
+            currentField.hint = getString(com.authenticator.app.R.string.current_password_hint)
+            currentField.isPasswordVisibilityToggleEnabled = true
+            currentField.layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            val currentEdit = com.google.android.material.textfield.TextInputEditText(this)
+            currentEdit.inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            currentEdit.maxLines = 1
+            currentEdit.setTextColor(getColor(com.authenticator.app.R.color.text_primary))
+            currentField.addView(currentEdit)
+
+            val newField = com.google.android.material.textfield.TextInputLayout(
+                this,
+                null,
+                com.google.android.material.R.style.Widget_Material3_TextInputLayout_OutlinedBox
+            )
+            newField.hint = getString(com.authenticator.app.R.string.new_password_hint)
+            newField.isPasswordVisibilityToggleEnabled = true
+            newField.layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            val newEdit = com.google.android.material.textfield.TextInputEditText(this)
+            newEdit.inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            newEdit.maxLines = 1
+            newEdit.setTextColor(getColor(com.authenticator.app.R.color.text_primary))
+            newField.addView(newEdit)
+
+            val confirmField = com.google.android.material.textfield.TextInputLayout(
+                this,
+                null,
+                com.google.android.material.R.style.Widget_Material3_TextInputLayout_OutlinedBox
+            )
+            confirmField.hint = getString(com.authenticator.app.R.string.confirm_new_password_hint)
+            confirmField.isPasswordVisibilityToggleEnabled = true
+            confirmField.layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            val confirmEdit = com.google.android.material.textfield.TextInputEditText(this)
+            confirmEdit.inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            confirmEdit.maxLines = 1
+            confirmEdit.setTextColor(getColor(com.authenticator.app.R.color.text_primary))
+            confirmField.addView(confirmEdit)
+
+            container.addView(currentField)
+            container.addView(newField)
+            container.addView(confirmField)
+
+            builder.setView(container)
+                .setPositiveButton(getString(com.authenticator.app.R.string.save)) { _, _ ->
+                    val currentPw = currentEdit.text.toString()
+                    val newPw = newEdit.text.toString()
+                    val confirmPw = confirmEdit.text.toString()
+
+                    if (currentPw.isEmpty() || newPw.isEmpty()) {
+                        showToast("All fields are required")
+                        return@setPositiveButton
+                    }
+                    if (newPw != confirmPw) {
+                        showToast(getString(com.authenticator.app.R.string.error_passwords_mismatch))
+                        return@setPositiveButton
+                    }
+                    if (newPw.length < 4) {
+                        showToast(getString(com.authenticator.app.R.string.error_password_too_short))
+                        return@setPositiveButton
+                    }
+
+                    val success = CryptoUtil.changePassword(currentPw, newPw)
+                    if (success) {
+                        masterPassword = newPw
+                        showToast(getString(com.authenticator.app.R.string.password_changed))
+                    } else {
+                        showToast(getString(com.authenticator.app.R.string.password_change_failed))
+                    }
+                }
+                .setNegativeButton(getString(com.authenticator.app.R.string.cancel), null)
+                .show()
+        } catch (e: Exception) {
+            logError("showChangePasswordDialog", e)
         }
     }
     
@@ -495,4 +858,5 @@ class MainActivity : AppCompatActivity() {
             }
         } catch (e: Exception) { logError("exportToUri", e) }
     }
+
 }

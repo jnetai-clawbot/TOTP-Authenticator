@@ -3,6 +3,11 @@
     xmlns:app="http://schemas.android.com/apk/res-auto">
     
     <item
+        android:id="@+id/action_backup"
+        android:title="@string/cloud_backup"
+        app:showAsAction="never" />
+    
+    <item
         android:id="@+id/action_import"
         android:title="@string/import_sites"
         app:showAsAction="never" />
@@ -10,6 +15,11 @@
     <item
         android:id="@+id/action_export"
         android:title="@string/export_sites"
+        app:showAsAction="never" />
+    
+    <item
+        android:id="@+id/action_settings"
+        android:title="@string/settings"
         app:showAsAction="never" />
     
 </menu>

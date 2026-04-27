@@ -6,6 +6,9 @@ class AuthenticatorApp : Application() {
     override fun onCreate() {
         super.onCreate()
         
+        // Initialize cryptographic utilities for password protection
+        CryptoUtil.init(this)
+        
         // Global crash handler — writes stack traces to internal storage
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             try {
