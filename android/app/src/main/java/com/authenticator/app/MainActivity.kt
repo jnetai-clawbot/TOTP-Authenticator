@@ -35,6 +35,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
+import java.io.File
 import java.io.InputStreamReader
 import java.util.UUID
 import javax.crypto.Cipher
@@ -57,142 +58,236 @@ class MainActivity : AppCompatActivity() {
     private val googleSignInLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
-        task.addOnCompleteListener { accountTask ->
-            if (accountTask.isSuccessful) {
-                val account = accountTask.result
-                signedInEmail = account.email
-                Toast.makeText(this, "Signed in as ${account.email}", Toast.LENGTH_SHORT).show()
-                loadSites()
-            } else {
-                Toast.makeText(this, "Google Sign-In failed", Toast.LENGTH_SHORT).show()
+        try {
+            val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+            task.addOnCompleteListener { accountTask ->
+                if (accountTask.isSuccessful) {
+                    val account = accountTask.result
+                    signedInEmail = account.email
+                    showToast("Signed in as ${account.email}")
+                    loadSites()
+                } else {
+                    showToast("Google Sign-In failed")
+                }
             }
+        } catch (e: Exception) {
+            logError("Google sign-in launcher", e)
         }
     }
     
     private val importFileLauncher = registerForActivityResult(
         ActivityResultContracts.GetContent()
-    ) { uri: Uri? -> uri?.let { importFromUri(it) } }
+    ) { uri: Uri? -> uri?.let { safeCall("import") { importFromUri(it) } } }
     
     private val exportFileLauncher = registerForActivityResult(
         ActivityResultContracts.CreateDocument("application/json")
-    ) { uri: Uri? -> uri?.let { exportToUri(it) } }
+    ) { uri: Uri? -> uri?.let { safeCall("export") { exportToUri(it) } } }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        binding = ActivityMainBinding.inflate(layoutInflater)
-        setContentView(binding.root)
-        
-        database = SiteDatabase.getInstance(this)
-        totpGenerator = TOTPGenerator()
-        
-        setupGoogleSignIn()
-        setupRecyclerView()
-        setupClickListeners()
-        setupSwipeToDelete()
-        
-        loadSites()
-        startCodeRefresh()
+        try {
+            super.onCreate(savedInstanceState)
+            binding = ActivityMainBinding.inflate(layoutInflater)
+            setContentView(binding.root)
+            
+            database = SiteDatabase.getInstance(this)
+            totpGenerator = TOTPGenerator()
+            
+            setupGoogleSignIn()
+            setupRecyclerView()
+            setupClickListeners()
+            setupSwipeToDelete()
+            
+            loadSites()
+            startCodeRefresh()
+        } catch (e: Exception) {
+            logError("onCreate", e)
+            showToast("App failed to start: ${e.message}")
+            finish()
+        }
+    }
+    
+    // Safe wrapper to catch all errors
+    private fun safeCall(tag: String, block: () -> Unit) {
+        try {
+            block()
+        } catch (e: Exception) {
+            logError(tag, e)
+            showToast("Error in $tag: ${e.message}")
+        }
+    }
+    
+    // Write error to a file you can access
+    private fun logError(tag: String, e: Throwable) {
+        try {
+            android.util.Log.e("Authenticator", "Error in $tag", e)
+            val errorFile = File(filesDir, "app_errors.txt")
+            val entry = buildString {
+                appendLine("[${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.UK).format(java.util.Date())}] $tag")
+                appendLine("  ${e.javaClass.name}: ${e.message}")
+                for (el in e.stackTrace.take(10)) {
+                    appendLine("  at ${el.className}.${el.methodName}(${el.fileName}:${el.lineNumber})")
+                }
+                e.cause?.let { cause ->
+                    appendLine("  Caused by: ${cause.javaClass.name}: ${cause.message}")
+                    for (el in cause.stackTrace.take(5)) {
+                        appendLine("    at ${el.className}.${el.methodName}(${el.fileName}:${el.lineNumber})")
+                    }
+                }
+                appendLine()
+            }
+            errorFile.appendText(entry)
+        } catch (_: Exception) {}
+    }
+    
+    private fun showToast(msg: String) {
+        try {
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {}
     }
     
     private fun setupGoogleSignIn() {
-        val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-            .requestEmail()
-            .requestScopes(Scope("https://www.googleapis.com/auth/contacts.readonly"))
-            .build()
-        
-        googleSignInClient = GoogleSignIn.getClient(this, gso)
-        
-        // Check if already signed in
-        val account = GoogleSignIn.getLastSignedInAccount(this)
-        if (account != null) {
-            signedInEmail = account.email
+        try {
+            val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                .requestEmail()
+                .build()
+            googleSignInClient = GoogleSignIn.getClient(this, gso)
+            val account = GoogleSignIn.getLastSignedInAccount(this)
+            if (account != null) {
+                signedInEmail = account.email
+            }
+        } catch (e: Exception) {
+            logError("setupGoogleSignIn", e)
         }
     }
     
     private fun signInWithGoogle() {
-        val signInIntent = googleSignInClient.signInIntent
-        googleSignInLauncher.launch(signInIntent)
+        try {
+            val signInIntent = googleSignInClient.signInIntent
+            googleSignInLauncher.launch(signInIntent)
+        } catch (e: Exception) {
+            logError("signInWithGoogle", e)
+        }
     }
     
     private fun signOutFromGoogle() {
-        googleSignInClient.signOut().addOnCompleteListener(this) {
-            signedInEmail = null
-            Toast.makeText(this, "Signed out", Toast.LENGTH_SHORT).show()
+        try {
+            googleSignInClient.signOut().addOnCompleteListener(this) {
+                signedInEmail = null
+                showToast("Signed out")
+            }
+        } catch (e: Exception) {
+            logError("signOutFromGoogle", e)
         }
     }
     
     private fun setupRecyclerView() {
-        adapter = SitesAdapter(
-            onCopyClick = { site -> copyCode(site.name) },
-            onEditClick = { site -> showEditDialog(site) }
-        )
-        
-        binding.recyclerSites.layoutManager = LinearLayoutManager(this)
-        binding.recyclerSites.adapter = adapter
+        try {
+            adapter = SitesAdapter(
+                onCopyClick = { site -> safeCall("copyCode") { copyCode(site.name) } },
+                onEditClick = { site -> safeCall("editSite") { showEditDialog(site) } }
+            )
+            binding.recyclerSites.layoutManager = LinearLayoutManager(this)
+            binding.recyclerSites.adapter = adapter
+        } catch (e: Exception) {
+            logError("setupRecyclerView", e)
+        }
     }
     
     private fun setupClickListeners() {
-        binding.fabAddSite.setOnClickListener { showAddDialog() }
-        
-        binding.btnGoogleSignIn.setOnClickListener {
-            if (signedInEmail != null) {
-                showSignOutDialog()
-            } else {
-                signInWithGoogle()
+        try {
+            binding.fabAddSite.setOnClickListener { showAddDialog() }
+            binding.btnGoogleSignIn.setOnClickListener {
+                if (signedInEmail != null) showSignOutDialog()
+                else signInWithGoogle()
             }
+        } catch (e: Exception) {
+            logError("setupClickListeners", e)
         }
     }
     
     private fun showSignOutDialog() {
-        AlertDialog.Builder(this)
-            .setTitle("Account")
-            .setMessage("Signed in as $signedInEmail\n\nSign out?")
-            .setPositiveButton("Sign Out") { _, _ -> signOutFromGoogle() }
-            .setNegativeButton("Cancel", null)
-            .show()
+        try {
+            AlertDialog.Builder(this)
+                .setTitle("Account")
+                .setMessage("Signed in as $signedInEmail\n\nSign out?")
+                .setPositiveButton("Sign Out") { _, _ -> signOutFromGoogle() }
+                .setNegativeButton("Cancel", null)
+                .show()
+        } catch (e: Exception) {
+            logError("showSignOutDialog", e)
+        }
     }
     
     private fun setupSwipeToDelete() {
-        val swipeHandler = object : ItemTouchHelper.SimpleCallback(0, ItemTouchHelper.LEFT) {
-            override fun onMove(r: RecyclerView, v: RecyclerView.ViewHolder, t: RecyclerView.ViewHolder) = false
-            override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
-                val position = viewHolder.bindingAdapterPosition
-                val site = adapter.currentList[position]
-                showDeleteConfirmation(site)
+        try {
+            val swipeHandler = object : ItemTouchHelper.SimpleCallback(0, ItemTouchHelper.LEFT) {
+                override fun onMove(r: RecyclerView, v: RecyclerView.ViewHolder, t: RecyclerView.ViewHolder) = false
+                override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
+                    try {
+                        val position = viewHolder.bindingAdapterPosition
+                        if (position >= 0) {
+                            val site = adapter.currentList[position]
+                            showDeleteConfirmation(site)
+                        }
+                    } catch (e: Exception) {
+                        logError("onSwiped", e)
+                    }
+                }
             }
+            ItemTouchHelper(swipeHandler).attachToRecyclerView(binding.recyclerSites)
+        } catch (e: Exception) {
+            logError("setupSwipeToDelete", e)
         }
-        ItemTouchHelper(swipeHandler).attachToRecyclerView(binding.recyclerSites)
     }
     
     private fun loadSites() {
-        lifecycleScope.launch(Dispatchers.IO) {
-            val sites = database.siteDao().getAll()
-            withContext(Dispatchers.Main) {
-                adapter.submitList(sites)
-                binding.tvEmptyState.visibility = if (sites.isEmpty()) View.VISIBLE else View.GONE
-                binding.recyclerSites.visibility = if (sites.isEmpty()) View.GONE else View.VISIBLE
-                updateSignInButton()
+        try {
+            lifecycleScope.launch(Dispatchers.IO) {
+                try {
+                    val sites = database.siteDao().getAll()
+                    withContext(Dispatchers.Main) {
+                        try {
+                            adapter.submitList(sites)
+                            binding.tvEmptyState.visibility = if (sites.isEmpty()) View.VISIBLE else View.GONE
+                            binding.recyclerSites.visibility = if (sites.isEmpty()) View.GONE else View.VISIBLE
+                            updateSignInButton()
+                        } catch (e: Exception) {
+                            logError("loadSites UI", e)
+                        }
+                    }
+                } catch (e: Exception) {
+                    logError("loadSites DB", e)
+                }
             }
+        } catch (e: Exception) {
+            logError("loadSites", e)
         }
     }
     
     private fun updateSignInButton() {
-        if (signedInEmail != null) {
-            binding.btnGoogleSignIn.text = "Sign Out"
-            binding.tvSignedInAs?.text = signedInEmail
-            binding.tvSignedInAs?.visibility = View.VISIBLE
-        } else {
-            binding.btnGoogleSignIn.text = "Sign in with Google"
-            binding.tvSignedInAs?.visibility = View.GONE
+        try {
+            if (signedInEmail != null) {
+                binding.btnGoogleSignIn.text = "Sign Out"
+                binding.tvSignedInAs.text = signedInEmail
+                binding.tvSignedInAs.visibility = View.VISIBLE
+            } else {
+                binding.btnGoogleSignIn.text = "Sign in with Google"
+                binding.tvSignedInAs.visibility = View.GONE
+            }
+        } catch (e: Exception) {
+            logError("updateSignInButton", e)
         }
     }
     
     private fun startCodeRefresh() {
         lifecycleScope.launch {
-            while (true) {
-                if (!isRefreshing) refreshCodes()
-                delay(1000)
+            try {
+                while (true) {
+                    if (!isRefreshing) refreshCodes()
+                    delay(1000)
+                }
+            } catch (e: Exception) {
+                logError("codeRefresh loop", e)
             }
         }
     }
@@ -202,123 +297,167 @@ class MainActivity : AppCompatActivity() {
         isRefreshing = true
         
         lifecycleScope.launch(Dispatchers.IO) {
-            val sites = database.siteDao().getAll()
-            val codes = mutableMapOf<String, Pair<String, Int>>()
-            
-            for (site in sites) {
-                if (site.enabled) {
-                    val secret = decryptSecret(site.secret)
-                    val code = totpGenerator.generate(secret, site.period, site.digits)
-                    val remaining = totpGenerator.getTimeRemaining(site.period)
-                    codes[site.name] = code to remaining
+            try {
+                val sites = database.siteDao().getAll()
+                val codes = mutableMapOf<String, Pair<String, Int>>()
+                
+                for (site in sites) {
+                    if (site.enabled) {
+                        try {
+                            val secret = decryptSecret(site.secret)
+                            val code = totpGenerator.generate(secret, site.period, site.digits)
+                            val remaining = totpGenerator.getTimeRemaining(site.period)
+                            codes[site.name] = code to remaining
+                        } catch (e: Exception) {
+                            logError("refreshCodes site: ${site.name}", e)
+                            codes[site.name] = "ERROR" to 0
+                        }
+                    }
                 }
+                
+                currentCodes = codes
+                withContext(Dispatchers.Main) {
+                    try {
+                        adapter.updateAllCodes(codes)
+                    } catch (e: Exception) {
+                        logError("updateAllCodes UI", e)
+                    }
+                }
+            } catch (e: Exception) {
+                logError("refreshCodes", e)
+            } finally {
+                isRefreshing = false
             }
-            
-            currentCodes = codes
-            adapter.updateAllCodes(codes)
-            
-            isRefreshing = false
         }
     }
     
     private fun copyCode(name: String) {
-        val codePair = currentCodes[name]
-        if (codePair != null) {
-            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            val clip = ClipData.newPlainText("TOTP Code", codePair.first)
-            clipboard.setPrimaryClip(clip)
-            Toast.makeText(this, "Code copied for $name", Toast.LENGTH_SHORT).show()
+        try {
+            val codePair = currentCodes[name]
+            if (codePair != null) {
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val clip = ClipData.newPlainText("TOTP Code", codePair.first)
+                clipboard.setPrimaryClip(clip)
+                showToast("Code copied for $name")
+            }
+        } catch (e: Exception) {
+            logError("copyCode", e)
         }
     }
     
     private fun showAddDialog() {
-        val dialogBinding = DialogAddSiteBinding.inflate(layoutInflater)
-        
-        AlertDialog.Builder(this)
-            .setTitle("Add Site")
-            .setView(dialogBinding.root)
-            .setPositiveButton("Add") { _, _ ->
-                val name = dialogBinding.etName.text.toString().trim()
-                val secret = dialogBinding.etSecret.text.toString().trim().uppercase().replace(" ", "")
-                val issuer = dialogBinding.etIssuer.text.toString().trim()
-                
-                if (name.isNotEmpty() && secret.isNotEmpty()) {
-                    addSite(name, secret, issuer)
-                } else {
-                    Toast.makeText(this, "Name and secret required", Toast.LENGTH_SHORT).show()
+        try {
+            val dialogBinding = DialogAddSiteBinding.inflate(layoutInflater)
+            AlertDialog.Builder(this)
+                .setTitle("Add Site")
+                .setView(dialogBinding.root)
+                .setPositiveButton("Add") { _, _ ->
+                    safeCall("addSiteDialog") {
+                        val name = dialogBinding.etName.text.toString().trim()
+                        val secret = dialogBinding.etSecret.text.toString().uppercase().replace(" ", "")
+                        val issuer = dialogBinding.etIssuer.text.toString().trim()
+                        if (name.isNotEmpty() && secret.isNotEmpty()) {
+                            addSite(name, secret, issuer)
+                        } else {
+                            showToast("Name and secret required")
+                        }
+                    }
                 }
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
+                .setNegativeButton("Cancel", null)
+                .show()
+        } catch (e: Exception) {
+            logError("showAddDialog", e)
+        }
     }
     
     private fun addSite(name: String, secret: String, issuer: String) {
-        val site = Site(
-            id = UUID.randomUUID().toString(),
-            name = name,
-            secret = encryptSecret(secret),
-            issuer = issuer,
-            digits = 6,
-            period = 30,
-            algorithm = "SHA1",
-            enabled = true,
-            createdAt = System.currentTimeMillis()
-        )
-        
         lifecycleScope.launch(Dispatchers.IO) {
-            database.siteDao().insert(site)
-            withContext(Dispatchers.Main) {
-                loadSites()
-                Toast.makeText(this@MainActivity, "Site added", Toast.LENGTH_SHORT).show()
+            try {
+                val site = Site(
+                    id = UUID.randomUUID().toString(),
+                    name = name,
+                    secret = encryptSecret(secret),
+                    issuer = issuer,
+                    digits = 6,
+                    period = 30,
+                    algorithm = "SHA1",
+                    enabled = true,
+                    createdAt = System.currentTimeMillis()
+                )
+                database.siteDao().insert(site)
+                withContext(Dispatchers.Main) {
+                    loadSites()
+                    showToast("Site added")
+                }
+            } catch (e: Exception) {
+                logError("addSite", e)
             }
         }
     }
     
     private fun showEditDialog(site: Site) {
-        val dialogBinding = DialogEditSiteBinding.inflate(layoutInflater)
-        dialogBinding.etName.setText(site.name)
-        dialogBinding.etIssuer.setText(site.issuer)
-        dialogBinding.switchEnabled.isChecked = site.enabled
-        
-        AlertDialog.Builder(this)
-            .setTitle("Edit Site")
-            .setView(dialogBinding.root)
-            .setPositiveButton("Save") { _, _ ->
-                val newName = dialogBinding.etName.text.toString().trim()
-                val newIssuer = dialogBinding.etIssuer.text.toString().trim()
-                val enabled = dialogBinding.switchEnabled.isChecked
-                updateSite(site.copy(name = newName, issuer = newIssuer, enabled = enabled))
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
+        try {
+            val dialogBinding = DialogEditSiteBinding.inflate(layoutInflater)
+            dialogBinding.etName.setText(site.name)
+            dialogBinding.etIssuer.setText(site.issuer)
+            dialogBinding.switchEnabled.isChecked = site.enabled
+            
+            AlertDialog.Builder(this)
+                .setTitle("Edit Site")
+                .setView(dialogBinding.root)
+                .setPositiveButton("Save") { _, _ ->
+                    safeCall("editSiteSave") {
+                        val newName = dialogBinding.etName.text.toString().trim()
+                        val newIssuer = dialogBinding.etIssuer.text.toString().trim()
+                        val enabled = dialogBinding.switchEnabled.isChecked
+                        updateSite(site.copy(name = newName, issuer = newIssuer, enabled = enabled))
+                    }
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        } catch (e: Exception) {
+            logError("showEditDialog", e)
+        }
     }
     
     private fun updateSite(site: Site) {
         lifecycleScope.launch(Dispatchers.IO) {
-            database.siteDao().update(site)
-            withContext(Dispatchers.Main) {
-                loadSites()
-                Toast.makeText(this@MainActivity, "Site updated", Toast.LENGTH_SHORT).show()
+            try {
+                database.siteDao().update(site)
+                withContext(Dispatchers.Main) {
+                    loadSites()
+                    showToast("Site updated")
+                }
+            } catch (e: Exception) {
+                logError("updateSite", e)
             }
         }
     }
     
     private fun showDeleteConfirmation(site: Site) {
-        AlertDialog.Builder(this)
-            .setTitle("Delete Site")
-            .setMessage("Delete ${site.name}?")
-            .setPositiveButton("Delete") { _, _ -> deleteSite(site) }
-            .setNegativeButton("Cancel") { _, _ -> loadSites() }
-            .setOnCancelListener { loadSites() }
-            .show()
+        try {
+            AlertDialog.Builder(this)
+                .setTitle("Delete Site")
+                .setMessage("Delete ${site.name}?")
+                .setPositiveButton("Delete") { _, _ -> safeCall("deleteSite") { deleteSite(site) } }
+                .setNegativeButton("Cancel") { _, _ -> loadSites() }
+                .setOnCancelListener { loadSites() }
+                .show()
+        } catch (e: Exception) {
+            logError("showDeleteConfirmation", e)
+        }
     }
     
     private fun deleteSite(site: Site) {
         lifecycleScope.launch(Dispatchers.IO) {
-            database.siteDao().delete(site)
-            withContext(Dispatchers.Main) {
-                loadSites()
-                Toast.makeText(this@MainActivity, "Site deleted", Toast.LENGTH_SHORT).show()
+            try {
+                database.siteDao().delete(site)
+                withContext(Dispatchers.Main) {
+                    loadSites()
+                    showToast("Site deleted")
+                }
+            } catch (e: Exception) {
+                logError("deleteSite", e)
             }
         }
     }
@@ -340,21 +479,22 @@ class MainActivity : AppCompatActivity() {
                     .setEncryptionPaddings(android.security.keystore.KeyProperties.ENCRYPTION_PADDING_NONE)
                     .setKeySize(256)
                     .build()
-                
                 kg.init(spec)
                 kg.generateKey()
             }
             
-            val key: SecretKey = keyStore.getKey("totp_key", null) as SecretKey
+            val key: KeyStore.SecretKeyEntry? = keyStore.getEntry("totp_key", null) as? KeyStore.SecretKeyEntry
+            val secretKey: SecretKey = key?.secretKey ?: throw Exception("Key not found")
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.ENCRYPT_MODE, key)
+            cipher.init(Cipher.ENCRYPT_MODE, secretKey)
             
             val encrypted = cipher.doFinal(secret.toByteArray())
             val iv = cipher.iv
-            
             val combined = iv + encrypted
             Base64.encodeToString(combined, Base64.NO_WRAP)
         } catch (e: Exception) {
+            logError("encryptSecret", e)
+            // Fallback: just base64 encode (not secure but won't crash)
             Base64.encodeToString(secret.toByteArray(), Base64.NO_WRAP)
         }
     }
@@ -363,43 +503,55 @@ class MainActivity : AppCompatActivity() {
         return try {
             val keyStore = KeyStore.getInstance("AndroidKeyStore")
             keyStore.load(null)
-            
-            val key: SecretKey = keyStore.getKey("totp_key", null) as? SecretKey ?: return encrypted
-            
+            val key = keyStore.getEntry("totp_key", null)
+            if (key !is KeyStore.SecretKeyEntry) {
+                return try {
+                    String(Base64.decode(encrypted, Base64.NO_WRAP))
+                } catch (_: Exception) { "" }
+            }
+            val secretKey = key.secretKey
             val combined = Base64.decode(encrypted, Base64.NO_WRAP)
+            if (combined.size < 13) return String(Base64.decode(encrypted, Base64.NO_WRAP))
             val iv = combined.copyOfRange(0, 12)
             val encryptedBytes = combined.copyOfRange(12, combined.size)
-            
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             val spec = GCMParameterSpec(128, iv)
-            cipher.init(Cipher.DECRYPT_MODE, key, spec)
-            
+            cipher.init(Cipher.DECRYPT_MODE, secretKey, spec)
             String(cipher.doFinal(encryptedBytes))
         } catch (e: Exception) {
+            logError("decryptSecret", e)
             try {
                 String(Base64.decode(encrypted, Base64.NO_WRAP))
-            } catch (e2: Exception) {
-                ""
-            }
+            } catch (_: Exception) { "" }
         }
     }
     
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        menuInflater.inflate(com.authenticator.app.R.menu.menu_main, menu)
-        return true
+        return try {
+            menuInflater.inflate(com.authenticator.app.R.menu.menu_main, menu)
+            true
+        } catch (e: Exception) {
+            logError("onCreateOptionsMenu", e)
+            false
+        }
     }
     
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        return when (item.itemId) {
-            com.authenticator.app.R.id.action_import -> {
-                importFileLauncher.launch("application/json")
-                true
+        return try {
+            when (item.itemId) {
+                com.authenticator.app.R.id.action_import -> {
+                    importFileLauncher.launch("application/json")
+                    true
+                }
+                com.authenticator.app.R.id.action_export -> {
+                    exportFileLauncher.launch("totp_sites.json")
+                    true
+                }
+                else -> super.onOptionsItemSelected(item)
             }
-            com.authenticator.app.R.id.action_export -> {
-                exportFileLauncher.launch("totp_sites.json")
-                true
-            }
-            else -> super.onOptionsItemSelected(item)
+        } catch (e: Exception) {
+            logError("onOptionsItemSelected", e)
+            false
         }
     }
     
@@ -420,66 +572,79 @@ class MainActivity : AppCompatActivity() {
             var imported = 0
             
             for (i in 0 until jsonArray.length()) {
-                val obj = jsonArray.getJSONObject(i)
-                val site = Site(
-                    id = UUID.randomUUID().toString(),
-                    name = obj.getString("name"),
-                    secret = encryptSecret(obj.getString("secret")),
-                    issuer = obj.optString("issuer", ""),
-                    digits = obj.optInt("digits", 6),
-                    period = obj.optInt("period", 30),
-                    algorithm = obj.optString("algorithm", "SHA1"),
-                    enabled = true,
-                    createdAt = System.currentTimeMillis()
-                )
-                
-                val existing = database.siteDao().getAll().find { it.name == site.name }
-                if (existing == null) {
-                    database.siteDao().insert(site)
-                    imported++
+                try {
+                    val obj = jsonArray.getJSONObject(i)
+                    val site = Site(
+                        id = UUID.randomUUID().toString(),
+                        name = obj.getString("name"),
+                        secret = encryptSecret(obj.getString("secret")),
+                        issuer = obj.optString("issuer", ""),
+                        digits = obj.optInt("digits", 6),
+                        period = obj.optInt("period", 30),
+                        algorithm = obj.optString("algorithm", "SHA1"),
+                        enabled = true,
+                        createdAt = System.currentTimeMillis()
+                    )
+                    val existing = database.siteDao().getAll().find { it.name == site.name }
+                    if (existing == null) {
+                        database.siteDao().insert(site)
+                        imported++
+                    }
+                } catch (e: Exception) {
+                    logError("import item $i", e)
                 }
             }
             
             loadSites()
-            Toast.makeText(this, "Imported $imported sites", Toast.LENGTH_SHORT).show()
+            showToast("Imported $imported sites")
         } catch (e: Exception) {
-            Toast.makeText(this, "Import failed: ${e.message}", Toast.LENGTH_SHORT).show()
+            logError("importFromUri", e)
+            showToast("Import failed: ${e.message}")
         }
     }
     
     private fun exportToUri(uri: Uri) {
         try {
             lifecycleScope.launch(Dispatchers.IO) {
-                val sites = database.siteDao().getAll()
-                val jsonArray = JSONArray()
-                
-                for (site in sites) {
-                    val obj = JSONObject().apply {
-                        put("name", site.name)
-                        put("secret", decryptSecret(site.secret))
-                        put("issuer", site.issuer)
-                        put("digits", site.digits)
-                        put("period", site.period)
-                        put("algorithm", site.algorithm)
+                try {
+                    val sites = database.siteDao().getAll()
+                    val jsonArray = JSONArray()
+                    for (site in sites) {
+                        try {
+                            val obj = JSONObject().apply {
+                                put("name", site.name)
+                                put("secret", decryptSecret(site.secret))
+                                put("issuer", site.issuer)
+                                put("digits", site.digits)
+                                put("period", site.period)
+                                put("algorithm", site.algorithm)
+                            }
+                            jsonArray.put(obj)
+                        } catch (e: Exception) {
+                            logError("export item ${site.name}", e)
+                        }
                     }
-                    jsonArray.put(obj)
-                }
-                
-                val jsonObject = JSONObject().apply {
-                    put("version", 1)
-                    put("app", "totp-authenticator")
-                    put("entries", jsonArray)
-                }
-                
-                withContext(Dispatchers.Main) {
-                    contentResolver.openOutputStream(uri)?.use { outputStream ->
-                        outputStream.write(jsonObject.toString(2).toByteArray())
+                    val jsonObject = JSONObject().apply {
+                        put("version", 1)
+                        put("app", "totp-authenticator")
+                        put("entries", jsonArray)
                     }
-                    Toast.makeText(this@MainActivity, "Exported ${sites.size} sites", Toast.LENGTH_SHORT).show()
+                    withContext(Dispatchers.Main) {
+                        try {
+                            contentResolver.openOutputStream(uri)?.use { outputStream ->
+                                outputStream.write(jsonObject.toString(2).toByteArray())
+                            }
+                            showToast("Exported ${sites.size} sites")
+                        } catch (e: Exception) {
+                            logError("export output", e)
+                        }
+                    }
+                } catch (e: Exception) {
+                    logError("export data", e)
                 }
             }
         } catch (e: Exception) {
-            Toast.makeText(this, "Export failed: ${e.message}", Toast.LENGTH_SHORT).show()
+            logError("exportToUri", e)
         }
     }
 }
