@@ -32,7 +32,7 @@ class AuthenticatorApp : Application() {
             
             // Let the default handler finish
             val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
-            if (defaultHandler != null && defaultHandler != this) {
+            if (defaultHandler != null) {
                 defaultHandler.uncaughtException(thread, throwable)
             }
         }
