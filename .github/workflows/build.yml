@@ -63,28 +63,22 @@ jobs:
           path: totp-release.apk
       
       - name: Create GitHub Release
-        id: create_release
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="v${{ github.run_number }}"
           TAG="totp-$VERSION"
           
-          # Check if release already exists
-          EXISTING=$(gh release view "$TAG" --json tagName 2>/dev/null || echo "")
+          echo "gh version: $(gh --version)"
+          echo "Creating release $TAG"
           
-          if [ -n "$EXISTING" ]; then
-            echo "Release $TAG already exists, uploading assets..."
-            gh release upload "$TAG" totp-debug.apk totp-release.apk --clobber
-          else
-            echo "Creating release $TAG..."
-            gh release create "$TAG" \
-              --title "TOTP Authenticator $VERSION" \
-              --notes "TOTP Authenticator $VERSION
-          - Debug: \`totp-debug.apk\`
-          - Release (signed): \`totp-release.apk\`
-          
-          **Target devices:** Samsung S7, S8, Pixel 6, Pixel 7 (minSdk 24)
-          **Features:** Google Sign-In, QR scanning, encrypted storage, dark theme" \
-              totp-debug.apk totp-release.apk
-          fi
+          gh release create "$TAG" \
+            --title "TOTP Authenticator $VERSION" \
+            --notes "TOTP Authenticator $VERSION
+          - Debug: totp-debug.apk
+          - Release (signed): totp-release.apk
+
+          Target devices: Samsung S7, S8, Pixel 6, Pixel 7 (minSdk 24)
+          Features: Google Sign-In, QR scanning, encrypted storage, dark theme" \
+            totp-debug.apk totp-release.apk || \
+          gh release upload "$TAG" totp-debug.apk totp-release.apk --clobber
