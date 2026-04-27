@@ -1,0 +1,8 @@
+# Changes
+
+- Added release signing configuration with keystore.jks (alias: authenticator)
+- Added proguard-rules.pro for release build optimisation
+- Updated GitHub Actions workflow to build both debug and release APKs
+- Release APK now signed for direct install on Samsung S7, S8, Pixel 6, Pixel 7
+- Keystore password stored in KEYSTORE_PASSWORD / KEY_PASSWORD env vars
+- MinSDK 24 covers all target devices

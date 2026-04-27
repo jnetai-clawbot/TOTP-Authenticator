@@ -1,4 +1,4 @@
-# TOTP Authenticator - Multi-Language Implementation
+# TOTP-Authenticator - Multi-Language Implementation
 
 A secure, open-source authenticator app (like Google Authenticator) with implementations in Python, PHP, and C. Features Google OAuth login, encrypted secret storage, and works as a drop-in replacement for other authenticator apps.
 
