@@ -72,4 +72,10 @@
     <string name="confirm_restore_title">Restore from Backup?</string>
     <string name="confirm_restore_message">This will replace all current sites with the backup data. Continue?</string>
     <string name="confirm">Confirm</string>
+    <!-- About -->
+    <string name="about">About</string>
+    <string name="about_title">About TOTP Authenticator</string>
+    <string name="about_message">TOTP Authenticator v1.1.0
+
+Made by jnetai.com</string>
 </resources>

@@ -477,6 +477,7 @@ class MainActivity : AppCompatActivity() {
                 com.authenticator.app.R.id.action_export -> { exportFileLauncher.launch("totp_sites.json"); true }
                 com.authenticator.app.R.id.action_backup -> { performBackup(); true }
                 com.authenticator.app.R.id.action_settings -> { showSettingsDialog(); true }
+                com.authenticator.app.R.id.action_about -> { showAboutDialog(); true }
                 else -> super.onOptionsItemSelected(item)
             }
         } catch (e: Exception) {
@@ -485,6 +486,20 @@ class MainActivity : AppCompatActivity() {
         }
     }
     
+    // ---- About Dialog ----
+
+    private fun showAboutDialog() {
+        try {
+            AlertDialog.Builder(this)
+                .setTitle(getString(com.authenticator.app.R.string.about_title))
+                .setMessage(getString(com.authenticator.app.R.string.about_message))
+                .setPositiveButton("OK", null)
+                .show()
+        } catch (e: Exception) {
+            logError("showAboutDialog", e)
+        }
+    }
+
     // ---- Settings Dialog ----
 
     private fun showSettingsDialog() {
