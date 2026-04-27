@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build & Release TOTP Authenticator APK
 
 on:
   push:
@@ -41,18 +41,39 @@ jobs:
           cd android
           ./gradlew assembleRelease 2>&1
       
-      - name: Find APKs
+      - name: Rename APKs
         run: |
-          find . -name "*.apk" -type f 2>/dev/null
+          cp android/app/build/outputs/apk/debug/app-debug.apk totp-debug.apk
+          cp android/app/build/outputs/apk/release/app-release.apk totp-release.apk
+          ls -lh totp-*.apk
       
-      - name: Upload debug APK
+      - name: Upload debug APK (artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: authenticator-debug
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: totp-debug
+          path: totp-debug.apk
       
-      - name: Upload release APK
+      - name: Upload release APK (artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: authenticator-release
-          path: android/app/build/outputs/apk/release/app-release.apk
+          name: totp-release
+          path: totp-release.apk
+      
+      - name: Create GitHub Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: "TOTP Authenticator v${{ github.run_number }}"
+          body: |
+            ## TOTP Authenticator v${{ github.run_number }}
+            
+            - Debug: `totp-debug.apk`
+            - Release (signed): `totp-release.apk`
+            
+            **Target devices:** Samsung S7, S8, Pixel 6, Pixel 7 (minSdk 24)
+            **Features:** Google Sign-In, QR scanning, encrypted storage, dark theme
+          files: |
+            totp-debug.apk
+            totp-release.apk
+          generate_release_notes: false

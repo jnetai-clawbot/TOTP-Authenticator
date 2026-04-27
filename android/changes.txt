@@ -6,3 +6,6 @@
 - Release APK now signed for direct install on Samsung S7, S8, Pixel 6, Pixel 7
 - Keystore password stored in KEYSTORE_PASSWORD / KEY_PASSWORD env vars
 - MinSDK 24 covers all target devices
+- APKs renamed to totp-debug.apk / totp-release.apk for clarity
+- GitHub Releases now auto-created with meaningful names (TOTP Authenticator vX)
+- APKs stored locally in apk/ with matching names
