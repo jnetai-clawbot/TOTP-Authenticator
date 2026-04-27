@@ -2,12 +2,6 @@
 <resources>
     <string name="app_name">Authenticator</string>
     
-    <!-- Auth -->
-    <string name="sign_in_with_google">Sign in with Google</string>
-    <string name="google_account">Google Account</string>
-    <string name="sign_out">Sign Out</string>
-    <string name="signed_in_as">Signed in as %1$s</string>
-    
     <!-- Sites -->
     <string name="add_site">Add Site</string>
     <string name="edit">Edit</string>
@@ -29,7 +23,6 @@
     
     <!-- Empty States -->
     <string name="empty_state">No sites added yet.\nTap + to add your first authenticator site.</string>
-    <string name="sign_in_prompt">Sign in with Google to sync your authenticator</string>
     
     <!-- Dialogs -->
     <string name="delete_site_title">Delete Site</string>

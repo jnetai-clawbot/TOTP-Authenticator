@@ -24,10 +24,6 @@ import com.authenticator.app.databinding.DialogEditSiteBinding
 import com.authenticator.app.db.Site
 import com.authenticator.app.db.SiteDatabase
 import com.authenticator.app.totp.TOTPGenerator
-import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInClient
-import com.google.android.gms.auth.api.signin.GoogleSignInOptions
-import com.google.android.gms.common.api.Scope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -49,31 +45,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var database: SiteDatabase
     private lateinit var totpGenerator: TOTPGenerator
     private lateinit var adapter: SitesAdapter
-    private lateinit var googleSignInClient: GoogleSignInClient
 
     private var currentCodes = mutableMapOf<String, Pair<String, Int>>()
     private var isRefreshing = false
-    private var signedInEmail: String? = null
-    
-    private val googleSignInLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        try {
-            val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
-            task.addOnCompleteListener { accountTask ->
-                if (accountTask.isSuccessful) {
-                    val account = accountTask.result
-                    signedInEmail = account.email
-                    showToast("Signed in as ${account.email}")
-                    loadSites()
-                } else {
-                    showToast("Google Sign-In failed")
-                }
-            }
-        } catch (e: Exception) {
-            logError("Google sign-in launcher", e)
-        }
-    }
     
     private val importFileLauncher = registerForActivityResult(
         ActivityResultContracts.GetContent()
@@ -92,7 +66,6 @@ class MainActivity : AppCompatActivity() {
             database = SiteDatabase.getInstance(this)
             totpGenerator = TOTPGenerator()
             
-            setupGoogleSignIn()
             setupRecyclerView()
             setupClickListeners()
             setupSwipeToDelete()
@@ -106,17 +79,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
     
-    // Safe wrapper to catch all errors
     private fun safeCall(tag: String, block: () -> Unit) {
-        try {
-            block()
-        } catch (e: Exception) {
-            logError(tag, e)
-            showToast("Error in $tag: ${e.message}")
-        }
+        try { block() } catch (e: Exception) { logError(tag, e); showToast("Error: ${e.message}") }
     }
     
-    // Write error to a file you can access
     private fun logError(tag: String, e: Throwable) {
         try {
             android.util.Log.e("Authenticator", "Error in $tag", e)
@@ -140,44 +106,7 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun showToast(msg: String) {
-        try {
-            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
-        } catch (_: Exception) {}
-    }
-    
-    private fun setupGoogleSignIn() {
-        try {
-            val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-                .requestEmail()
-                .build()
-            googleSignInClient = GoogleSignIn.getClient(this, gso)
-            val account = GoogleSignIn.getLastSignedInAccount(this)
-            if (account != null) {
-                signedInEmail = account.email
-            }
-        } catch (e: Exception) {
-            logError("setupGoogleSignIn", e)
-        }
-    }
-    
-    private fun signInWithGoogle() {
-        try {
-            val signInIntent = googleSignInClient.signInIntent
-            googleSignInLauncher.launch(signInIntent)
-        } catch (e: Exception) {
-            logError("signInWithGoogle", e)
-        }
-    }
-    
-    private fun signOutFromGoogle() {
-        try {
-            googleSignInClient.signOut().addOnCompleteListener(this) {
-                signedInEmail = null
-                showToast("Signed out")
-            }
-        } catch (e: Exception) {
-            logError("signOutFromGoogle", e)
-        }
+        try { Toast.makeText(this, msg, Toast.LENGTH_SHORT).show() } catch (_: Exception) {}
     }
     
     private fun setupRecyclerView() {
@@ -196,25 +125,8 @@ class MainActivity : AppCompatActivity() {
     private fun setupClickListeners() {
         try {
             binding.fabAddSite.setOnClickListener { showAddDialog() }
-            binding.btnGoogleSignIn.setOnClickListener {
-                if (signedInEmail != null) showSignOutDialog()
-                else signInWithGoogle()
-            }
         } catch (e: Exception) {
             logError("setupClickListeners", e)
-        }
-    }
-    
-    private fun showSignOutDialog() {
-        try {
-            AlertDialog.Builder(this)
-                .setTitle("Account")
-                .setMessage("Signed in as $signedInEmail\n\nSign out?")
-                .setPositiveButton("Sign Out") { _, _ -> signOutFromGoogle() }
-                .setNegativeButton("Cancel", null)
-                .show()
-        } catch (e: Exception) {
-            logError("showSignOutDialog", e)
         }
     }
     
@@ -250,7 +162,6 @@ class MainActivity : AppCompatActivity() {
                             adapter.submitList(sites)
                             binding.tvEmptyState.visibility = if (sites.isEmpty()) View.VISIBLE else View.GONE
                             binding.recyclerSites.visibility = if (sites.isEmpty()) View.GONE else View.VISIBLE
-                            updateSignInButton()
                         } catch (e: Exception) {
                             logError("loadSites UI", e)
                         }
@@ -261,21 +172,6 @@ class MainActivity : AppCompatActivity() {
             }
         } catch (e: Exception) {
             logError("loadSites", e)
-        }
-    }
-    
-    private fun updateSignInButton() {
-        try {
-            if (signedInEmail != null) {
-                binding.btnGoogleSignIn.text = "Sign Out"
-                binding.tvSignedInAs.text = signedInEmail
-                binding.tvSignedInAs.visibility = View.VISIBLE
-            } else {
-                binding.btnGoogleSignIn.text = "Sign in with Google"
-                binding.tvSignedInAs.visibility = View.GONE
-            }
-        } catch (e: Exception) {
-            logError("updateSignInButton", e)
         }
     }
     
@@ -317,11 +213,7 @@ class MainActivity : AppCompatActivity() {
                 
                 currentCodes = codes
                 withContext(Dispatchers.Main) {
-                    try {
-                        adapter.updateAllCodes(codes)
-                    } catch (e: Exception) {
-                        logError("updateAllCodes UI", e)
-                    }
+                    try { adapter.updateAllCodes(codes) } catch (e: Exception) { logError("updateAllCodes UI", e) }
                 }
             } catch (e: Exception) {
                 logError("refreshCodes", e)
@@ -385,10 +277,7 @@ class MainActivity : AppCompatActivity() {
                     createdAt = System.currentTimeMillis()
                 )
                 database.siteDao().insert(site)
-                withContext(Dispatchers.Main) {
-                    loadSites()
-                    showToast("Site added")
-                }
+                withContext(Dispatchers.Main) { loadSites(); showToast("Site added") }
             } catch (e: Exception) {
                 logError("addSite", e)
             }
@@ -424,10 +313,7 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 database.siteDao().update(site)
-                withContext(Dispatchers.Main) {
-                    loadSites()
-                    showToast("Site updated")
-                }
+                withContext(Dispatchers.Main) { loadSites(); showToast("Site updated") }
             } catch (e: Exception) {
                 logError("updateSite", e)
             }
@@ -452,10 +338,7 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 database.siteDao().delete(site)
-                withContext(Dispatchers.Main) {
-                    loadSites()
-                    showToast("Site deleted")
-                }
+                withContext(Dispatchers.Main) { loadSites(); showToast("Site deleted") }
             } catch (e: Exception) {
                 logError("deleteSite", e)
             }
@@ -494,7 +377,6 @@ class MainActivity : AppCompatActivity() {
             Base64.encodeToString(combined, Base64.NO_WRAP)
         } catch (e: Exception) {
             logError("encryptSecret", e)
-            // Fallback: just base64 encode (not secure but won't crash)
             Base64.encodeToString(secret.toByteArray(), Base64.NO_WRAP)
         }
     }
@@ -505,9 +387,7 @@ class MainActivity : AppCompatActivity() {
             keyStore.load(null)
             val key = keyStore.getEntry("totp_key", null)
             if (key !is KeyStore.SecretKeyEntry) {
-                return try {
-                    String(Base64.decode(encrypted, Base64.NO_WRAP))
-                } catch (_: Exception) { "" }
+                return try { String(Base64.decode(encrypted, Base64.NO_WRAP)) } catch (_: Exception) { "" }
             }
             val secretKey = key.secretKey
             val combined = Base64.decode(encrypted, Base64.NO_WRAP)
@@ -520,9 +400,7 @@ class MainActivity : AppCompatActivity() {
             String(cipher.doFinal(encryptedBytes))
         } catch (e: Exception) {
             logError("decryptSecret", e)
-            try {
-                String(Base64.decode(encrypted, Base64.NO_WRAP))
-            } catch (_: Exception) { "" }
+            try { String(Base64.decode(encrypted, Base64.NO_WRAP)) } catch (_: Exception) { "" }
         }
     }
     
@@ -539,14 +417,8 @@ class MainActivity : AppCompatActivity() {
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         return try {
             when (item.itemId) {
-                com.authenticator.app.R.id.action_import -> {
-                    importFileLauncher.launch("application/json")
-                    true
-                }
-                com.authenticator.app.R.id.action_export -> {
-                    exportFileLauncher.launch("totp_sites.json")
-                    true
-                }
+                com.authenticator.app.R.id.action_import -> { importFileLauncher.launch("application/json"); true }
+                com.authenticator.app.R.id.action_export -> { exportFileLauncher.launch("totp_sites.json"); true }
                 else -> super.onOptionsItemSelected(item)
             }
         } catch (e: Exception) {
@@ -562,15 +434,10 @@ class MainActivity : AppCompatActivity() {
             val jsonString = reader.readText()
             reader.close()
             
-            val jsonArray = if (jsonString.trim().startsWith("[")) {
-                JSONArray(jsonString)
-            } else {
-                val json = JSONObject(jsonString)
-                if (json.has("entries")) json.getJSONArray("entries") else JSONArray()
-            }
+            val jsonArray = if (jsonString.trim().startsWith("[")) JSONArray(jsonString)
+            else { val json = JSONObject(jsonString); if (json.has("entries")) json.getJSONArray("entries") else JSONArray() }
             
             var imported = 0
-            
             for (i in 0 until jsonArray.length()) {
                 try {
                     val obj = jsonArray.getJSONObject(i)
@@ -586,15 +453,9 @@ class MainActivity : AppCompatActivity() {
                         createdAt = System.currentTimeMillis()
                     )
                     val existing = database.siteDao().getAll().find { it.name == site.name }
-                    if (existing == null) {
-                        database.siteDao().insert(site)
-                        imported++
-                    }
-                } catch (e: Exception) {
-                    logError("import item $i", e)
-                }
+                    if (existing == null) { database.siteDao().insert(site); imported++ }
+                } catch (e: Exception) { logError("import item $i", e) }
             }
-            
             loadSites()
             showToast("Imported $imported sites")
         } catch (e: Exception) {
@@ -611,40 +472,27 @@ class MainActivity : AppCompatActivity() {
                     val jsonArray = JSONArray()
                     for (site in sites) {
                         try {
-                            val obj = JSONObject().apply {
+                            jsonArray.put(JSONObject().apply {
                                 put("name", site.name)
                                 put("secret", decryptSecret(site.secret))
                                 put("issuer", site.issuer)
                                 put("digits", site.digits)
                                 put("period", site.period)
                                 put("algorithm", site.algorithm)
-                            }
-                            jsonArray.put(obj)
-                        } catch (e: Exception) {
-                            logError("export item ${site.name}", e)
-                        }
+                            })
+                        } catch (e: Exception) { logError("export ${site.name}", e) }
                     }
                     val jsonObject = JSONObject().apply {
-                        put("version", 1)
-                        put("app", "totp-authenticator")
-                        put("entries", jsonArray)
+                        put("version", 1); put("app", "totp-authenticator"); put("entries", jsonArray)
                     }
                     withContext(Dispatchers.Main) {
                         try {
-                            contentResolver.openOutputStream(uri)?.use { outputStream ->
-                                outputStream.write(jsonObject.toString(2).toByteArray())
-                            }
+                            contentResolver.openOutputStream(uri)?.use { it.write(jsonObject.toString(2).toByteArray()) }
                             showToast("Exported ${sites.size} sites")
-                        } catch (e: Exception) {
-                            logError("export output", e)
-                        }
+                        } catch (e: Exception) { logError("export output", e) }
                     }
-                } catch (e: Exception) {
-                    logError("export data", e)
-                }
+                } catch (e: Exception) { logError("export data", e) }
             }
-        } catch (e: Exception) {
-            logError("exportToUri", e)
-        }
+        } catch (e: Exception) { logError("exportToUri", e) }
     }
 }
