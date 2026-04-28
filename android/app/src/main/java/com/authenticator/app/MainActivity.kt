@@ -101,6 +101,10 @@ class MainActivity : AppCompatActivity() {
             totpGenerator = TOTPGenerator()
             driveBackupManager = DriveBackupManager(this)
 
+            setSupportActionBar(binding.toolbar)
+            supportActionBar?.setDisplayShowTitleEnabled(true)
+            supportActionBar?.title = getString(com.authenticator.app.R.string.app_name)
+
             initAccountManager()
 
             setupRecyclerView()
@@ -270,7 +274,14 @@ class MainActivity : AppCompatActivity() {
     private fun performGoogleSignIn() {
         try {
             if (currentAccountName != null) {
-                showBackupRestoreDialog()
+                // Show backup/restore/sign-out options
+                androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle("Google Account")
+                    .setMessage("Signed in as $currentAccountName")
+                    .setPositiveButton("Backup Now") { _, _ -> performBackup() }
+                    .setNeutralButton("Restore") { _, _ -> confirmAndRestore() }
+                    .setNegativeButton("Sign Out") { _, _ -> signOut() }
+                    .show()
             } else {
                 // Show Google account picker (no Firebase needed)
                 val intent = android.accounts.AccountManager.newChooseAccountIntent(
@@ -282,6 +293,7 @@ class MainActivity : AppCompatActivity() {
             }
         } catch (e: Exception) {
             logError("performGoogleSignIn", e)
+            showToast("Sign in error: ${e.message}")
         }
     }
     
@@ -580,7 +592,6 @@ class MainActivity : AppCompatActivity() {
                 com.authenticator.app.R.id.action_import -> { importFileLauncher.launch("application/json"); true }
                 com.authenticator.app.R.id.action_export -> { exportFileLauncher.launch("totp_sites.json"); true }
                 com.authenticator.app.R.id.action_backup -> { performBackup(); true }
-                com.authenticator.app.R.id.action_settings -> { showSettingsDialog(); true }
                 com.authenticator.app.R.id.action_about -> { showAboutDialog(); true }
                 else -> super.onOptionsItemSelected(item)
             }
@@ -596,17 +607,13 @@ class MainActivity : AppCompatActivity() {
         try {
             val versionName = try {
                 packageManager.getPackageInfo(packageName, 0).versionName
-            } catch (_: Exception) { "1.1.3" }
+            } catch (_: Exception) { "1.1.5" }
 
-            val versionCode = try {
-                packageManager.getPackageInfo(packageName, 0).versionCode.toString()
-            } catch (_: Exception) { "" }
-
-            val message = "TOTP Authenticator\nVersion $versionName (build $versionCode)\n\nMade by jnetai.com"
-            val repoUrl = "https://github.com/jnetai-clawbot/TOTP-Authenticator"
+            val message = "TOTP Authenticator\nVersion $versionName\n\nMade by jnetai.com"
+            val repoUrl = "https://github.com/jnetai-clawbot/TOTP-Authenticator/releases/latest"
             val siteUrl = "https://jnetai.com"
 
-            AlertDialog.Builder(this)
+            val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
                 .setTitle(getString(com.authenticator.app.R.string.about_title))
                 .setMessage(message)
                 .setPositiveButton("OK", null)
@@ -620,20 +627,21 @@ class MainActivity : AppCompatActivity() {
                             putExtra(Intent.EXTRA_TEXT, "Check out TOTP Authenticator: $repoUrl")
                         }
                         startActivity(Intent.createChooser(shareIntent, "Share TOTP Authenticator"))
-                    } catch (e: Exception) {
-                        logError("shareApp", e)
+                    } catch (e2: Exception) {
+                        showToast("Share failed: ${e2.message}")
                     }
                 }
                 .setNegativeButton("Visit") { _, _ ->
                     try {
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(siteUrl))
-                        startActivity(intent)
-                    } catch (e: Exception) {
-                        logError("visitSite", e)
+                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(siteUrl)))
+                    } catch (e2: Exception) {
+                        showToast("Browser not available")
                     }
                 }
-                .show()
+                .create()
+            dialog.show()
         } catch (e: Exception) {
+            showToast("About failed: ${e.message}")
             logError("showAboutDialog", e)
         }
     }
