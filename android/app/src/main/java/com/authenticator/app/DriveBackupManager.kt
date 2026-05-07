@@ -15,21 +15,15 @@ import java.util.Locale
 import java.util.UUID
 
 /**
- * Manages encrypted backup to Google Drive using the Drive API v3.
- * No Firebase dependency — uses raw Google Sign-In + Drive scope.
- *
- * IMPORTANT: Google Drive API requires the app's SHA-1 fingerprint to be
- * registered in the Google Cloud Console. If Drive sync fails with auth
- * errors, register the app's signing key SHA-1 at:
- * https://console.cloud.google.com/apis/credentials
+ * Manages encrypted backup to a user-chosen location via the Storage Access Framework.
+ * No Google API keys or Cloud Console required — uses the system file picker so users
+ * can save/load from Google Drive, Dropbox, local storage, etc.
  */
 class DriveBackupManager(private val context: Context) {
 
     companion object {
-        private const val TAG = "DriveBackup"
-        private const val BACKUP_FILE_NAME = "totp-backup.enc"
+        private const val TAG = "BackupManager"
         private const val BACKUP_MIME_TYPE = "application/octet-stream"
-        private const val BACKUP_FOLDER_NAME = "AuthenticatorBackups"
     }
 
     private val database by lazy { SiteDatabase.getInstance(context) }
@@ -43,8 +37,6 @@ class DriveBackupManager(private val context: Context) {
         val entries = JSONArray()
         for (site in sites) {
             val secret = try {
-                // The secrets in the DB are encrypted with Android KeyStore.
-                // We need to decrypt them first.
                 decryptSiteSecret(site.secret)
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to decrypt secret for ${site.name}", e)
@@ -86,8 +78,6 @@ class DriveBackupManager(private val context: Context) {
                 val obj = entries.getJSONObject(i)
                 val name = obj.getString("name")
                 val secret = obj.getString("secret")
-
-                // Encrypt secret with local Android KeyStore before storing
                 val encryptedSecret = encryptSiteSecret(secret)
 
                 val site = Site(
@@ -102,7 +92,6 @@ class DriveBackupManager(private val context: Context) {
                     createdAt = System.currentTimeMillis()
                 )
 
-                // Avoid duplicates with same name
                 val existing = database.siteDao().getAll().find { it.name == site.name }
                 if (existing == null) {
                     database.siteDao().insert(site)
@@ -115,243 +104,20 @@ class DriveBackupManager(private val context: Context) {
         return imported
     }
 
-    // ---- Drive API Operations ----
+    // ---- Drive API Operations (replaced by SAF file picker — kept for compat) ----
 
-    /**
-     * Uploads an encrypted backup string to Google Drive as "totp-backup.enc".
-     * Scoped to the authenticated account from the Drive service.
-     *
-     * Uses manual HTTP requests against the Drive API v3 since we don't have
-     * the google-api-client dependency. This is cleaner than adding the full
-     * client library which has many transitive dependencies.
-     */
     fun uploadToDrive(accessToken: String, encryptedContent: String): Boolean {
-        return try {
-            // 1. Search for existing backup to get its file ID
-            val existingId = findExistingBackupFileId(accessToken)
-
-            // 2. If exists, delete it (Drive API v3 - update requires full metadata too)
-            if (existingId != null) {
-                deleteFile(accessToken, existingId)
-            }
-
-            // 3. Upload new file
-            uploadFile(accessToken, encryptedContent)
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "Upload to Drive failed", e)
-            false
-        }
+        Log.w(TAG, "Drive API upload not available — use SAF file picker instead")
+        return false
     }
 
-    /**
-     * Downloads the encrypted backup from Google Drive.
-     * Returns the encrypted content as a Base64 string, or null if no backup exists.
-     */
     fun downloadFromDrive(accessToken: String): String? {
-        return try {
-            val fileId = findExistingBackupFileId(accessToken) ?: return null
-            downloadFile(accessToken, fileId)
-        } catch (e: Exception) {
-            Log.e(TAG, "Download from Drive failed", e)
-            null
-        }
-    }
-
-    /**
-     * Checks if a backup file exists on Drive.
-     */
-    fun backupExists(accessToken: String): Boolean {
-        return try {
-            findExistingBackupFileId(accessToken) != null
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to check backup existence", e)
-            false
-        }
-    }
-
-    // ---- Internal Drive API v3 HTTP Methods ----
-
-    private fun findExistingBackupFileId(accessToken: String): String? {
-        val url = "https://www.googleapis.com/drive/v3/files" +
-                "?q=name='$BACKUP_FILE_NAME' and trashed=false" +
-                "&fields=files(id,name)" +
-                "&pageSize=1"
-
-        val json = executeGet(url, accessToken)
-        val files = json.optJSONArray("files")
-        if (files != null && files.length() > 0) {
-            return files.getJSONObject(0).getString("id")
-        }
+        Log.w(TAG, "Drive API download not available — use SAF file picker instead")
         return null
     }
 
-    private fun uploadFile(accessToken: String, content: String): String? {
-        val metadataUrl = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart"
-
-        val boundary = "Boundary_${System.currentTimeMillis()}"
-        val lineEnd = "\r\n"
-
-        val bodyBuilder = StringBuilder()
-        // Metadata part
-        bodyBuilder.append("--$boundary$lineEnd")
-        bodyBuilder.append("Content-Type: application/json; charset=UTF-8$lineEnd$lineEnd")
-        bodyBuilder.append("{\"name\":\"$BACKUP_FILE_NAME\",\"mimeType\":\"$BACKUP_MIME_TYPE\"}$lineEnd")
-        // Content part
-        bodyBuilder.append("--$boundary$lineEnd")
-        bodyBuilder.append("Content-Type: $BACKUP_MIME_TYPE$lineEnd$lineEnd")
-        bodyBuilder.append(content)
-        bodyBuilder.append(lineEnd)
-        bodyBuilder.append("--$boundary--$lineEnd")
-
-        val bodyBytes = bodyBuilder.toString().toByteArray(Charsets.UTF_8)
-        val contentType = "multipart/related; boundary=$boundary"
-
-        val result = executePostBytes(metadataUrl, accessToken, contentType, bodyBytes)
-        return result.optString("id", null)
-    }
-
-    private fun downloadFile(accessToken: String, fileId: String): String {
-        val url = "https://www.googleapis.com/drive/v3/files/$fileId?alt=media"
-        return executeGetRaw(url, accessToken)
-    }
-
-    private fun deleteFile(accessToken: String, fileId: String): Boolean {
-        val url = "https://www.googleapis.com/drive/v3/files/$fileId"
-        executeDelete(url, accessToken)
-        return true
-    }
-
-    // ---- HTTP Helpers ----
-
-    private fun executeGet(url: String, accessToken: String): JSONObject {
-        val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
-        conn.requestMethod = "GET"
-        conn.setRequestProperty("Authorization", "Bearer $accessToken")
-        conn.setRequestProperty("Accept", "application/json")
-        conn.connectTimeout = 15000
-        conn.readTimeout = 15000
-        conn.connect()
-
-        val responseCode = conn.responseCode
-        if (responseCode !in 200..299) {
-            val errorBody = try {
-                BufferedReader(InputStreamReader(conn.errorStream, Charsets.UTF_8)).readText()
-            } catch (_: Exception) { "Unknown error" }
-            conn.disconnect()
-            val errorMsg = "Drive API GET failed ($responseCode): $errorBody"
-            Log.e(TAG, errorMsg)
-            throw Exception(errorMsg)
-        }
-
-        try {
-            val reader = BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8))
-            val response = reader.readText()
-            reader.close()
-            return JSONObject(response)
-        } catch (e: Exception) {
-            conn.disconnect()
-            throw e
-        } finally {
-            conn.disconnect()
-        }
-    }
-
-    private fun executeGetRaw(url: String, accessToken: String): String {
-        val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
-        conn.requestMethod = "GET"
-        conn.setRequestProperty("Authorization", "Bearer $accessToken")
-        conn.connectTimeout = 15000
-        conn.readTimeout = 15000
-        conn.connect()
-
-        val responseCode = conn.responseCode
-        if (responseCode !in 200..299) {
-            val errorBody = try {
-                BufferedReader(InputStreamReader(conn.errorStream, Charsets.UTF_8)).readText()
-            } catch (_: Exception) { "Unknown error" }
-            conn.disconnect()
-            val errorMsg = "Drive API GET failed ($responseCode): $errorBody"
-            Log.e(TAG, errorMsg)
-            throw Exception(errorMsg)
-        }
-
-        try {
-            val reader = BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8))
-            val response = reader.readText()
-            reader.close()
-            return response
-        } catch (e: Exception) {
-            conn.disconnect()
-            throw e
-        } finally {
-            conn.disconnect()
-        }
-    }
-
-    private fun executePostBytes(
-        url: String,
-        accessToken: String,
-        contentType: String,
-        body: ByteArray
-    ): JSONObject {
-        val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
-        conn.requestMethod = "POST"
-        conn.doOutput = true
-        conn.setRequestProperty("Authorization", "Bearer $accessToken")
-        conn.setRequestProperty("Content-Type", contentType)
-        conn.setRequestProperty("Accept", "application/json")
-        conn.connectTimeout = 15000
-        conn.readTimeout = 15000
-        if (android.os.Build.VERSION.SDK_INT >= 24) {
-            conn.setFixedLengthStreamingMode(body.size)
-        } else {
-            conn.setChunkedStreamingMode(0)
-        }
-        conn.connect()
-
-        try {
-            conn.outputStream.use { it.write(body) }
-            val responseCode = conn.responseCode
-            if (responseCode !in 200..299) {
-                val errorBody = try {
-                    BufferedReader(InputStreamReader(conn.errorStream, Charsets.UTF_8)).readText()
-                } catch (_: Exception) { "Unknown error" }
-                conn.disconnect()
-                val errorMsg = "Drive API POST failed ($responseCode): $errorBody"
-                Log.e(TAG, errorMsg)
-                throw Exception(errorMsg)
-            }
-            val reader = BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8))
-            val response = reader.readText()
-            reader.close()
-            return JSONObject(response)
-        } catch (e: Exception) {
-            conn.disconnect()
-            throw e
-        } finally {
-            conn.disconnect()
-        }
-    }
-
-    private fun executeDelete(url: String, accessToken: String) {
-        val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
-        conn.requestMethod = "DELETE"
-        conn.setRequestProperty("Authorization", "Bearer $accessToken")
-        conn.connectTimeout = 15000
-        conn.readTimeout = 15000
-        conn.connect()
-        val responseCode = conn.responseCode
-        if (responseCode !in 200..299) {
-            val errorBody = try {
-                BufferedReader(InputStreamReader(conn.errorStream, Charsets.UTF_8)).readText()
-            } catch (_: Exception) { "Unknown error" }
-            conn.disconnect()
-            val errorMsg = "Drive API DELETE failed ($responseCode): $errorBody"
-            Log.e(TAG, errorMsg)
-            throw Exception(errorMsg)
-        }
-        conn.disconnect()
+    fun backupExists(accessToken: String): Boolean {
+        return false
     }
 
     // ---- Delegate to existing encrypt/decrypt in MainActivity-style KeyStore ----

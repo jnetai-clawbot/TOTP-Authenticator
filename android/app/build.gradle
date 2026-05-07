@@ -74,7 +74,8 @@ dependencies {
     implementation "androidx.room:room-runtime:$room_version"
     kapt "androidx.room:room-compiler:$room_version"
     
-    // Drive API (HTTP-based, no Firebase)
+    // Drive API no longer used — backup uses SAF file picker
+    // Users save/restore encrypted backups via system file picker to any cloud
     implementation 'com.google.http-client:google-http-client-gson:1.43.3'
     
     // Testing

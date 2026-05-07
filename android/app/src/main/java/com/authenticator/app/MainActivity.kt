@@ -60,7 +60,7 @@ class MainActivity : AppCompatActivity() {
     private var currentAccessToken: String? = null
 
     private companion object {
-        private const val DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file"
+        private const val DRIVE_SCOPE = ""
     }
     
     private val importFileLauncher = registerForActivityResult(
@@ -71,22 +71,7 @@ class MainActivity : AppCompatActivity() {
         ActivityResultContracts.CreateDocument("application/json")
     ) { uri: Uri? -> uri?.let { safeCall("export") { exportToUri(it) } } }
 
-    private val accountPickerLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        safeCall("accountPickerResult") {
-            val accountEmail = result.data?.getStringExtra(android.accounts.AccountManager.KEY_ACCOUNT_NAME)
-            if (accountEmail != null) {
-                currentAccountName = accountEmail
-                getDriveToken(accountEmail)
-                updateGoogleSignInCard()
-                showToast("Signed in as $accountEmail")
-                showBackupRestoreDialog()
-            } else {
-                showToast("Sign in cancelled")
-            }
-        }
-    }
+
 
     override fun onCreate(savedInstanceState: Bundle?) {
         try {
@@ -121,41 +106,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun initAccountManager() {
-        try {
-            val accounts = android.accounts.AccountManager.get(this)
-                .getAccountsByType("com.google")
-            if (accounts.isNotEmpty()) {
-                currentAccountName = accounts[0].name
-                getDriveToken(currentAccountName!!)
-                updateGoogleSignInCard()
-            }
-        } catch (e: Exception) {
-            logError("initAccountManager", e)
-        }
-    }
-
-    private fun getDriveToken(accountEmail: String) {
-        try {
-            val accountManager = android.accounts.AccountManager.get(this)
-            val account = android.accounts.Account(accountEmail, "com.google")
-            accountManager.getAuthToken(account, DRIVE_SCOPE, null, this,
-                { future ->
-                    try {
-                        val bundle = future.result
-                        currentAccessToken = bundle.getString(android.accounts.AccountManager.KEY_AUTHTOKEN)
-                        if (currentAccessToken != null) {
-                            showToast("Drive access granted")
-                        }
-                    } catch (e: Exception) {
-                        logError("getAuthToken future", e)
-                        showToast("Failed to get Drive access: ${e.message}")
-                    }
-                },
-                null
-            )
-        } catch (e: Exception) {
-            logError("getDriveToken", e)
-        }
+        // Google Drive API not used — backup uses SAF file picker instead
+        // Users can save/restore backups to Google Drive via the system file picker
     }
     
     private fun safeCall(tag: String, block: () -> Unit) {
@@ -204,7 +156,7 @@ class MainActivity : AppCompatActivity() {
     private fun setupClickListeners() {
         try {
             binding.fabAddSite.setOnClickListener { showAddDialog() }
-            binding.btnGoogleSignIn.setOnClickListener { performGoogleSignIn() }
+            binding.btnGoogleSignIn.setOnClickListener { openBackupFilePicker() }
             updateGoogleSignInCard()
 
             // Search functionality
@@ -259,13 +211,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateGoogleSignInCard() {
         try {
-            if (currentAccountName != null) {
-                binding.tvSignedInAs.text = currentAccountName
-                binding.btnGoogleSignIn.text = getString(com.authenticator.app.R.string.sign_out_google)
-            } else {
-                binding.tvSignedInAs.text = "Not signed in"
-                binding.btnGoogleSignIn.text = getString(com.authenticator.app.R.string.sign_in_google)
-            }
+            binding.tvSignedInAs.text = "Save encrypted backup to cloud"
+            binding.btnGoogleSignIn.text = getString(com.authenticator.app.R.string.backup_now)
         } catch (e: Exception) {
             logError("updateGoogleSignInCard", e)
         }
@@ -289,7 +236,7 @@ class MainActivity : AppCompatActivity() {
                     false, null,
                     null, null, null
                 )
-                accountPickerLauncher.launch(intent)
+                openBackupFilePicker()
             }
         } catch (e: Exception) {
             logError("performGoogleSignIn", e)
@@ -667,8 +614,8 @@ class MainActivity : AppCompatActivity() {
                 items.add(getString(com.authenticator.app.R.string.sign_out_google))
                 actions.add { signOut() }
             } else {
-                items.add(getString(com.authenticator.app.R.string.sign_in_google))
-                actions.add { signIn() }
+                items.add(getString(com.authenticator.app.R.string.backup_now))
+                actions.add { openBackupFilePicker() }
             }
 
             items.add(getString(com.authenticator.app.R.string.change_password))
@@ -690,171 +637,45 @@ class MainActivity : AppCompatActivity() {
 
     // ---- Google Sign-In / Sign-Out ----
 
-    private fun signIn() {
-        try {
-            // Show Google account picker
-            val intent = android.accounts.AccountManager.newChooseAccountIntent(
-                null, null, arrayOf("com.google"),
-                false, null, null, null, null
-            )
-            accountPickerLauncher.launch(intent)
-        } catch (e: Exception) {
-            logError("signIn", e)
-            showToast("Sign in failed: ${e.message}")
-        }
-    }
 
     private fun signOut() {
-        try {
-            currentAccountName = null
-            currentAccessToken = null
-            updateGoogleSignInCard()
-            showToast("Signed out")
-        } catch (e: Exception) {
-            logError("signOut", e)
-        }
+        // No-op: Google sign-in no longer used
+        // Backup now uses system file picker (SAF) which works with any cloud storage
+        openRestoreFilePicker()
     }
 
     // ---- Backup / Restore ----
 
     private fun showBackupRestoreDialog() {
         val items = arrayOf(
-            getString(com.authenticator.app.R.string.backup_now),
-            getString(com.authenticator.app.R.string.restore_from_backup)
+            "Backup (save encrypted file)",
+            "Restore (load encrypted file)"
         )
         AlertDialog.Builder(this)
-            .setTitle(getString(com.authenticator.app.R.string.cloud_backup))
+            .setTitle("Backup / Restore")
             .setItems(items) { _, which ->
                 when (which) {
-                    0 -> performBackup()
-                    1 -> confirmAndRestore()
+                    0 -> openBackupFilePicker()
+                    1 -> openRestoreFilePicker()
                 }
             }
-            .setNegativeButton(getString(com.authenticator.app.R.string.cancel), null)
+            .setNegativeButton("Cancel", null)
             .show()
     }
 
     private fun performBackup() {
-        if (masterPassword.isEmpty()) {
-            showToast("No master password set")
-            return
-        }
-
-        if (currentAccountName == null) {
-            showToast("Please sign in to Google first")
-            signIn()
-            return
-        }
-
-        showToast("Backing up...")
-
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                // Build encrypted backup JSON
-                val encryptedBackup = driveBackupManager.buildBackupJson(masterPassword)
-
-                // Get access token for current account
-                val accessToken = currentAccountName?.let { email ->
-                    try {
-                        val am = getSystemService(Context.ACCOUNT_SERVICE) as android.accounts.AccountManager
-                        val account = android.accounts.Account(email, "com.google")
-                        val future = am.getAuthToken(account, "oauth2:https://www.googleapis.com/auth/drive.file", null, false, null, null)
-                        val bundle = future.result
-                        bundle.getString(android.accounts.AccountManager.KEY_AUTHTOKEN)
-                    } catch (e: Exception) {
-                        logError("getBackupToken", e)
-                        null
-                    }
-                }
-
-                if (accessToken == null) {
-                    withContext(Dispatchers.Main) { showToast("Failed to get Drive access token") }
-                    return@launch
-                }
-
-                val success = driveBackupManager.uploadToDrive(accessToken, encryptedBackup)
-                withContext(Dispatchers.Main) {
-                    if (success) {
-                        showToast(getString(com.authenticator.app.R.string.backup_success))
-                    } else {
-                        showToast(getString(com.authenticator.app.R.string.backup_failed))
-                    }
-                }
-            } catch (e: Exception) {
-                logError("backup", e)
-                withContext(Dispatchers.Main) {
-                    showToast("Backup failed: ${e.message}")
-                }
-            }
-        }
+        // Backup now uses system file picker — user chooses where to save
+        openBackupFilePicker()
     }
 
     private fun confirmAndRestore() {
-        AlertDialog.Builder(this)
-            .setTitle(getString(com.authenticator.app.R.string.confirm_restore_title))
-            .setMessage(getString(com.authenticator.app.R.string.confirm_restore_message))
-            .setPositiveButton(getString(com.authenticator.app.R.string.confirm)) { _, _ ->
-                performRestore()
-            }
-            .setNegativeButton(getString(com.authenticator.app.R.string.cancel), null)
-            .show()
+        // Restore now uses system file picker — user chooses where to load from
+        openRestoreFilePicker()
     }
 
     private fun performRestore() {
-        if (masterPassword.isEmpty()) {
-            showToast("No master password set")
-            return
-        }
-
-        if (currentAccountName == null) {
-            showToast("Please sign in to Google first")
-            signIn()
-            return
-        }
-
-        showToast("Restoring...")
-
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                val accessToken = currentAccountName?.let { email ->
-                    try {
-                        val am = getSystemService(Context.ACCOUNT_SERVICE) as android.accounts.AccountManager
-                        val account = android.accounts.Account(email, "com.google")
-                        val future = am.getAuthToken(account, "oauth2:https://www.googleapis.com/auth/drive.file", null, false, null, null)
-                        val bundle = future.result
-                        bundle.getString(android.accounts.AccountManager.KEY_AUTHTOKEN)
-                    } catch (e: Exception) {
-                        logError("getRestoreToken", e)
-                        null
-                    }
-                }
-
-                if (accessToken == null) {
-                    withContext(Dispatchers.Main) { showToast("Failed to get access token") }
-                    return@launch
-                }
-
-                val encryptedContent = driveBackupManager.downloadFromDrive(accessToken)
-                if (encryptedContent == null) {
-                    withContext(Dispatchers.Main) {
-                        showToast(getString(com.authenticator.app.R.string.no_backup_found))
-                    }
-                    return@launch
-                }
-
-                val count = driveBackupManager.restoreFromBackup(masterPassword, encryptedContent)
-
-                withContext(Dispatchers.Main) {
-                    loadSites()
-                    showToast(String.format(getString(com.authenticator.app.R.string.restore_success), count))
-                }
-            } catch (e: Exception) {
-                logError("restore", e)
-                withContext(Dispatchers.Main) {
-                    showToast(getString(com.authenticator.app.R.string.restore_failed, e.message))
-                }
-            }
-        }
+        // Restore now uses system file picker — user chooses where to load from
+        openRestoreFilePicker()
     }
 
     // ---- Change Password ----
