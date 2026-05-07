@@ -218,29 +218,76 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun performGoogleSignIn() {
-        try {
-            if (currentAccountName != null) {
-                // Show backup/restore/sign-out options
-                androidx.appcompat.app.AlertDialog.Builder(this)
-                    .setTitle("Google Account")
-                    .setMessage("Signed in as $currentAccountName")
-                    .setPositiveButton("Backup Now") { _, _ -> performBackup() }
-                    .setNeutralButton("Restore") { _, _ -> confirmAndRestore() }
-                    .setNegativeButton("Sign Out") { _, _ -> signOut() }
-                    .show()
-            } else {
-                // Show Google account picker (no Firebase needed)
-                val intent = android.accounts.AccountManager.newChooseAccountIntent(
-                    null, null, arrayOf("com.google"),
-                    false, null,
-                    null, null, null
-                )
-                openBackupFilePicker()
+    private fun openBackupFilePicker() {
+        // Opens file picker to save an encrypted backup.
+        // User can choose Google Drive, Dropbox, local storage, etc.
+        // No Google API keys needed — SAF handles cloud storage seamlessly.
+        encryptedBackupSaveLauncher.launch("totp_backup.enc")
+    }
+
+    private fun openRestoreFilePicker() {
+        // Opens file picker to load an encrypted backup
+        encryptedBackupLoadLauncher.launch(arrayOf("application/octet-stream", "*/*"))
+    }
+
+    private val encryptedBackupSaveLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri: Uri? ->
+        uri?.let { safeCall("encryptedBackupSave") { saveEncryptedBackup(it) } }
+    }
+    
+    private val encryptedBackupLoadLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let { safeCall("encryptedBackupLoad") { loadEncryptedBackup(it) } }
+    }
+
+    private fun saveEncryptedBackup(uri: Uri) {
+        if (masterPassword.isEmpty()) {
+            showToast("No master password set")
+            return
+        }
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val encryptedData = driveBackupManager.buildBackupJson(masterPassword)
+                withContext(Dispatchers.Main) {
+                    try {
+                        contentResolver.openOutputStream(uri)?.use { it.write(encryptedData.toByteArray()) }
+                        showToast(getString(com.authenticator.app.R.string.backup_success))
+                    } catch (e: Exception) {
+                        logError("saveBackup write", e)
+                        showToast("Backup failed: ${e.message}")
+                    }
+                }
+            } catch (e: Exception) {
+                logError("saveBackup", e)
+                withContext(Dispatchers.Main) { showToast("Backup failed: ${e.message}") }
             }
-        } catch (e: Exception) {
-            logError("performGoogleSignIn", e)
-            showToast("Sign in error: ${e.message}")
+        }
+    }
+
+    private fun loadEncryptedBackup(uri: Uri) {
+        if (masterPassword.isEmpty()) {
+            showToast("No master password set")
+            return
+        }
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val encryptedData = withContext(Dispatchers.IO) {
+                    contentResolver.openInputStream(uri)?.bufferedReader()?.readText()
+                        ?: throw Exception("Could not read backup file")
+                }
+                val count = driveBackupManager.restoreFromBackup(masterPassword, encryptedData)
+                withContext(Dispatchers.Main) {
+                    loadSites()
+                    showToast(String.format(getString(com.authenticator.app.R.string.restore_success), count))
+                }
+            } catch (e: Exception) {
+                logError("loadBackup", e)
+                withContext(Dispatchers.Main) {
+                    showToast(getString(com.authenticator.app.R.string.restore_failed, e.message))
+                }
+            }
         }
     }
     
