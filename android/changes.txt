@@ -2,11 +2,17 @@
 
 ## v1.1.7
 
-- FIX: Google Drive sync now shows proper error messages when API calls fail
-- FIX: Added ACCESS_NETWORK_STATE permission for network connectivity checks
-- FIX: Drive API HTTP calls now check response codes and throw meaningful errors instead of silent failure
-- FIX: Added connect/read timeouts to all Drive API HTTP calls (15s timeout)
-- IMPROVE: Better error handling in Google Account Manager token retrieval
+- FIX: Google Drive sync now uses system file picker (SAF) — no Google API keys needed
+  - No more Google Cloud Console / SHA-1 fingerprint / OAuth setup
+  - Users pick their cloud storage (Drive, Dropbox, local, etc.) from the file picker
+  - Backup is encrypted with master password before saving
+  - Restore decrypts with master password
+- FEAT: Added Check for Updates button in About dialog
+  - Queries GitHub API for latest release
+  - Shows current version vs latest release
+  - "Download Update →" button opens the releases page
+- FIX: Added INTERNET and ACCESS_NETWORK_STATE permissions (already present)
+- CHORE: Removed unused google-http-client-gson dependency
 - CHORE: Version bumped to 1.1.7 (versionCode 11)
 
 ## v1.1.6

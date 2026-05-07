@@ -37,6 +37,7 @@ import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
 import java.util.UUID
+import com.google.gson.Gson
 import javax.crypto.Cipher
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
@@ -610,7 +611,9 @@ class MainActivity : AppCompatActivity() {
             val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
                 .setTitle(getString(com.authenticator.app.R.string.about_title))
                 .setMessage(message)
-                .setPositiveButton("OK", null)
+                .setPositiveButton("Check Updates") { _, _ ->
+                    checkForUpdates()
+                }
                 .setNeutralButton("Share") { _, _ ->
                     try {
                         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -637,6 +640,61 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             showToast("About failed: ${e.message}")
             logError("showAboutDialog", e)
+        }
+    }
+
+    private fun checkForUpdates() {
+        val currentVersion = try {
+            packageManager.getPackageInfo(packageName, 0).versionName ?: "1.1.7"
+        } catch (_: Exception) { "1.1.7" }
+        
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val url = java.net.URL("https://api.github.com/repos/jnetai-clawbot/TOTP-Authenticator/releases/latest")
+                val conn = url.openConnection() as java.net.HttpURLConnection
+                conn.requestMethod = "GET"
+                conn.setRequestProperty("Accept", "application/vnd.github.v3+json")
+                conn.connectTimeout = 10000
+                conn.readTimeout = 10000
+                
+                val responseCode = conn.responseCode
+                if (responseCode != 200) {
+                    conn.disconnect()
+                    withContext(Dispatchers.Main) {
+                        showToast("Update check failed (HTTP $responseCode)")
+                    }
+                    return@launch
+                }
+                
+                val response = conn.inputStream.bufferedReader().readText()
+                conn.disconnect()
+                
+                val gson = Gson()
+                val release = gson.fromJson(response, Map::class.java)
+                val latestTag = release["tag_name"] as? String ?: "unknown"
+                val htmlUrl = release["html_url"] as? String ?: "https://github.com/jnetai-clawbot/TOTP-Authenticator/releases/latest"
+                
+                withContext(Dispatchers.Main) {
+                    val updateDialog = androidx.appcompat.app.AlertDialog.Builder(this@MainActivity)
+                        .setTitle("Update Check")
+                        .setMessage("Current version: $currentVersion\nLatest release: $latestTag")
+                        .setPositiveButton("Download Update →") { _, _ ->
+                            try {
+                                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(htmlUrl)))
+                            } catch (e: Exception) {
+                                showToast("Browser not available")
+                            }
+                        }
+                        .setNegativeButton("Close", null)
+                        .create()
+                    updateDialog.show()
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("Authenticator", "Update check failed: ${e.message}", e)
+                withContext(Dispatchers.Main) {
+                    showToast("Update check failed: ${e.message}")
+                }
+            }
         }
     }
 
