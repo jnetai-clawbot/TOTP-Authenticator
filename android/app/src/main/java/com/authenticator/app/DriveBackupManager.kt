@@ -17,6 +17,11 @@ import java.util.UUID
 /**
  * Manages encrypted backup to Google Drive using the Drive API v3.
  * No Firebase dependency — uses raw Google Sign-In + Drive scope.
+ *
+ * IMPORTANT: Google Drive API requires the app's SHA-1 fingerprint to be
+ * registered in the Google Cloud Console. If Drive sync fails with auth
+ * errors, register the app's signing key SHA-1 at:
+ * https://console.cloud.google.com/apis/credentials
  */
 class DriveBackupManager(private val context: Context) {
 
@@ -223,7 +228,21 @@ class DriveBackupManager(private val context: Context) {
         val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
         conn.requestMethod = "GET"
         conn.setRequestProperty("Authorization", "Bearer $accessToken")
+        conn.setRequestProperty("Accept", "application/json")
+        conn.connectTimeout = 15000
+        conn.readTimeout = 15000
         conn.connect()
+
+        val responseCode = conn.responseCode
+        if (responseCode !in 200..299) {
+            val errorBody = try {
+                BufferedReader(InputStreamReader(conn.errorStream, Charsets.UTF_8)).readText()
+            } catch (_: Exception) { "Unknown error" }
+            conn.disconnect()
+            val errorMsg = "Drive API GET failed ($responseCode): $errorBody"
+            Log.e(TAG, errorMsg)
+            throw Exception(errorMsg)
+        }
 
         try {
             val reader = BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8))
@@ -231,13 +250,7 @@ class DriveBackupManager(private val context: Context) {
             reader.close()
             return JSONObject(response)
         } catch (e: Exception) {
-            // Try reading error stream
-            try {
-                val reader = BufferedReader(InputStreamReader(conn.errorStream, Charsets.UTF_8))
-                val error = reader.readText()
-                reader.close()
-                Log.e(TAG, "GET error response: $error")
-            } catch (_: Exception) {}
+            conn.disconnect()
             throw e
         } finally {
             conn.disconnect()
@@ -248,7 +261,20 @@ class DriveBackupManager(private val context: Context) {
         val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
         conn.requestMethod = "GET"
         conn.setRequestProperty("Authorization", "Bearer $accessToken")
+        conn.connectTimeout = 15000
+        conn.readTimeout = 15000
         conn.connect()
+
+        val responseCode = conn.responseCode
+        if (responseCode !in 200..299) {
+            val errorBody = try {
+                BufferedReader(InputStreamReader(conn.errorStream, Charsets.UTF_8)).readText()
+            } catch (_: Exception) { "Unknown error" }
+            conn.disconnect()
+            val errorMsg = "Drive API GET failed ($responseCode): $errorBody"
+            Log.e(TAG, errorMsg)
+            throw Exception(errorMsg)
+        }
 
         try {
             val reader = BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8))
@@ -256,12 +282,7 @@ class DriveBackupManager(private val context: Context) {
             reader.close()
             return response
         } catch (e: Exception) {
-            try {
-                val reader = BufferedReader(InputStreamReader(conn.errorStream, Charsets.UTF_8))
-                val error = reader.readText()
-                reader.close()
-                Log.e(TAG, "GET raw error response: $error")
-            } catch (_: Exception) {}
+            conn.disconnect()
             throw e
         } finally {
             conn.disconnect()
@@ -279,6 +300,9 @@ class DriveBackupManager(private val context: Context) {
         conn.doOutput = true
         conn.setRequestProperty("Authorization", "Bearer $accessToken")
         conn.setRequestProperty("Content-Type", contentType)
+        conn.setRequestProperty("Accept", "application/json")
+        conn.connectTimeout = 15000
+        conn.readTimeout = 15000
         if (android.os.Build.VERSION.SDK_INT >= 24) {
             conn.setFixedLengthStreamingMode(body.size)
         } else {
@@ -288,17 +312,22 @@ class DriveBackupManager(private val context: Context) {
 
         try {
             conn.outputStream.use { it.write(body) }
+            val responseCode = conn.responseCode
+            if (responseCode !in 200..299) {
+                val errorBody = try {
+                    BufferedReader(InputStreamReader(conn.errorStream, Charsets.UTF_8)).readText()
+                } catch (_: Exception) { "Unknown error" }
+                conn.disconnect()
+                val errorMsg = "Drive API POST failed ($responseCode): $errorBody"
+                Log.e(TAG, errorMsg)
+                throw Exception(errorMsg)
+            }
             val reader = BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8))
             val response = reader.readText()
             reader.close()
             return JSONObject(response)
         } catch (e: Exception) {
-            try {
-                val reader = BufferedReader(InputStreamReader(conn.errorStream, Charsets.UTF_8))
-                val error = reader.readText()
-                reader.close()
-                Log.e(TAG, "POST error response: $error")
-            } catch (_: Exception) {}
+            conn.disconnect()
             throw e
         } finally {
             conn.disconnect()
@@ -309,8 +338,19 @@ class DriveBackupManager(private val context: Context) {
         val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
         conn.requestMethod = "DELETE"
         conn.setRequestProperty("Authorization", "Bearer $accessToken")
+        conn.connectTimeout = 15000
+        conn.readTimeout = 15000
         conn.connect()
-        conn.responseCode // Consume response
+        val responseCode = conn.responseCode
+        if (responseCode !in 200..299) {
+            val errorBody = try {
+                BufferedReader(InputStreamReader(conn.errorStream, Charsets.UTF_8)).readText()
+            } catch (_: Exception) { "Unknown error" }
+            conn.disconnect()
+            val errorMsg = "Drive API DELETE failed ($responseCode): $errorBody"
+            Log.e(TAG, errorMsg)
+            throw Exception(errorMsg)
+        }
         conn.disconnect()
     }
 

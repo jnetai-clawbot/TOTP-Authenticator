@@ -1,5 +1,16 @@
 # Changes
 
+## v1.1.7
+
+- FIX: Google Drive sync now shows proper error messages when API calls fail
+- FIX: Added ACCESS_NETWORK_STATE permission for network connectivity checks
+- FIX: Drive API HTTP calls now check response codes and throw meaningful errors instead of silent failure
+- FIX: Added connect/read timeouts to all Drive API HTTP calls (15s timeout)
+- IMPROVE: Better error handling in Google Account Manager token retrieval
+- CHORE: Version bumped to 1.1.7 (versionCode 11)
+
+## v1.1.6
+
 - Added release signing configuration with keystore.jks (alias: authenticator)
 - Added proguard-rules.pro for release build optimisation
 - Updated GitHub Actions workflow to build both debug and release APKs
