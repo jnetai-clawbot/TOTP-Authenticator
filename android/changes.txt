@@ -1,5 +1,15 @@
 # Changes
 
+## v1.1.8
+
+- FEAT: QR code scanning to pair accounts like Google Authenticator
+  - "Scan QR Code" button added to the Add Site dialog
+  - Use Camera to scan an otpauth:// QR code directly
+  - Choose Image to upload a PNG/photo of a QR code from the gallery
+  - Parses otpauth://totp/ and otpauth://hotp/ URIs (name, secret, issuer auto-filled)
+  - Handles rotated/large photos during image decode
+- CHORE: Version bumped to 1.1.8 (versionCode 12)
+
 ## v1.1.7
 
 - FIX: Google Drive sync now uses system file picker (SAF) — no Google API keys needed

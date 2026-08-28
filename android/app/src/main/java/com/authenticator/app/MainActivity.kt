@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
 import android.util.Base64
@@ -26,6 +27,13 @@ import com.authenticator.app.databinding.DialogEditSiteBinding
 import com.authenticator.app.db.Site
 import com.authenticator.app.db.SiteDatabase
 import com.authenticator.app.totp.TOTPGenerator
+import com.google.zxing.BinaryBitmap
+import com.google.zxing.QRCodeReader
+import com.google.zxing.RGBLuminanceSource
+import com.google.zxing.common.HybridBinarizer
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanIntentResult
+import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -71,6 +79,19 @@ class MainActivity : AppCompatActivity() {
     private val exportFileLauncher = registerForActivityResult(
         ActivityResultContracts.CreateDocument("application/json")
     ) { uri: Uri? -> uri?.let { safeCall("export") { exportToUri(it) } } }
+
+    private val qrImageLauncher = registerForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? -> uri?.let { safeCall("qrImage") { decodeQrImage(uri) } } }
+
+    private val qrScanLauncher = registerForActivityResult(ScanContract()) { result: ScanIntentResult ->
+        safeCall("qrScan") { handleQrResult(result.contents) }
+    }
+
+    // Live references to the currently open Add-Site dialog fields
+    private var addNameEdit: com.google.android.material.textfield.TextInputEditText? = null
+    private var addSecretEdit: com.google.android.material.textfield.TextInputEditText? = null
+    private var addIssuerEdit: com.google.android.material.textfield.TextInputEditText? = null
 
 
 
@@ -407,6 +428,12 @@ class MainActivity : AppCompatActivity() {
     private fun showAddDialog() {
         try {
             val dialogBinding = DialogAddSiteBinding.inflate(layoutInflater)
+            addNameEdit = dialogBinding.etName
+            addSecretEdit = dialogBinding.etSecret
+            addIssuerEdit = dialogBinding.etIssuer
+
+            dialogBinding.btnScanQr.setOnClickListener { showQrScanChooser() }
+
             AlertDialog.Builder(this)
                 .setTitle(getString(com.authenticator.app.R.string.add_site))
                 .setView(dialogBinding.root)
@@ -423,10 +450,177 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 .setNegativeButton(getString(com.authenticator.app.R.string.cancel), null)
+                .setOnDismissListener { addNameEdit = null; addSecretEdit = null; addIssuerEdit = null }
                 .show()
         } catch (e: Exception) {
             logError("showAddDialog", e)
         }
+    }
+
+    private fun showQrScanChooser() {
+        try {
+            val options = arrayOf(
+                "Use Camera",
+                "Choose Image"
+            )
+            AlertDialog.Builder(this)
+                .setTitle("Scan QR Code")
+                .setItems(options) { _, which ->
+                    when (which) {
+                        0 -> launchCameraScan()
+                        1 -> qrImageLauncher.launch("image/*")
+                    }
+                }
+                .setNegativeButton(getString(com.authenticator.app.R.string.cancel), null)
+                .show()
+        } catch (e: Exception) {
+            logError("showQrScanChooser", e)
+        }
+    }
+
+    private fun launchCameraScan() {
+        try {
+            val options = ScanOptions()
+            options.setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+            options.setPrompt("Scan a QR code to add a site")
+            options.setCameraId(0)
+            options.setBeepEnabled(false)
+            options.setBarcodeImageEnabled(false)
+            qrScanLauncher.launch(options)
+        } catch (e: Exception) {
+            logError("launchCameraScan", e)
+            showToast("Camera scan failed: ${e.message}")
+        }
+    }
+
+    private fun handleQrResult(contents: String?) {
+        if (contents.isNullOrEmpty()) {
+            showToast("No QR code detected")
+            return
+        }
+        try {
+            val siteData = parseOtpauthUri(contents)
+            if (siteData != null) {
+                addNameEdit?.setText(siteData.first)
+                addSecretEdit?.setText(siteData.second)
+                addIssuerEdit?.setText(siteData.third)
+                showToast("QR code scanned")
+            } else {
+                showToast(getString(com.authenticator.app.R.string.error_invalid_qr))
+            }
+        } catch (e: Exception) {
+            logError("handleQrResult", e)
+            showToast(getString(com.authenticator.app.R.string.error_invalid_qr))
+        }
+    }
+
+    private fun parseOtpauthUri(raw: String): Triple<String, String, String>? {
+        // Accept otpauth://totp/... and otpauth://hotp/... (returns name, secret, issuer)
+        val trimmed = raw.trim()
+        if (!trimmed.startsWith("otpauth://", ignoreCase = true)) return null
+        return try {
+            val uri = Uri.parse(trimmed)
+            val scheme = uri.scheme?.lowercase()
+            val host = uri.host?.lowercase()
+            if (scheme != "otpauth" || (host != "totp" && host != "hotp")) return null
+
+            val secret = uri.getQueryParameter("secret") ?: return null
+            var issuer = uri.getQueryParameter("issuer") ?: ""
+
+            var label = uri.lastPathSegment ?: ""
+            label = android.net.Uri.decode(label)
+
+            val name: String
+            if (label.contains(":")) {
+                val parts = label.split(":", limit = 2)
+                if (issuer.isEmpty()) issuer = parts[0].trim()
+                name = parts[1].trim()
+            } else {
+                name = label.trim()
+            }
+            if (name.isEmpty()) return null
+            Triple(name, secret, issuer)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun decodeQrImage(uri: Uri) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val bitmap = withContext(Dispatchers.IO) {
+                    try {
+                        contentResolver.openInputStream(uri)?.use { input ->
+                            // Read bounds first to downscale huge camera photos safely
+                            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                            BitmapFactory.decodeStream(input, null, opts)
+                            var sample = 1
+                            while (maxOf(opts.outWidth, opts.outHeight) / (sample * 2) >= 2000) sample *= 2
+                            val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sample.coerceAtLeast(1) }
+                            contentResolver.openInputStream(uri)?.use { input2 ->
+                                BitmapFactory.decodeStream(input2, null, decodeOpts)
+                            }
+                        }
+                    } catch (e: Exception) { null }
+                }
+                if (bitmap == null) {
+                    withContext(Dispatchers.Main) { showToast("Could not read image") }
+                    return@launch
+                }
+                val decoded = tryDecodeBitmap(bitmap)
+                if (decoded != null) {
+                    withContext(Dispatchers.Main) { handleQrResult(decoded) }
+                } else {
+                    withContext(Dispatchers.Main) { showToast("No QR code found in image") }
+                }
+            } catch (e: Exception) {
+                logError("decodeQrImage", e)
+                withContext(Dispatchers.Main) {
+                    showToast("No QR code found in image")
+                }
+            }
+        }
+    }
+
+    private fun tryDecodeBitmap(original: android.graphics.Bitmap): String? {
+        var bitmap = original
+        // Downscale very large bitmaps (camera photos can be 4000px+) to speed up decoding
+        val maxDim = 1500
+        if (maxOf(bitmap.width, bitmap.height) > maxDim) {
+            val scale = maxDim.toFloat() / maxOf(bitmap.width, bitmap.height)
+            val newW = (bitmap.width * scale).toInt().coerceAtLeast(1)
+            val newH = (bitmap.height * scale).toInt().coerceAtLeast(1)
+            try {
+                val scaled = android.graphics.Bitmap.createScaledBitmap(bitmap, newW, newH, true)
+                if (scaled != original) original.recycle()
+                bitmap = scaled
+            } catch (e: Exception) { /* keep original */ }
+        }
+        // Try original plus 90/180/270 rotation to handle EXIF orientation
+        for (rotation in 0..3) {
+            try {
+                val toDecode = if (rotation == 0) bitmap
+                else android.graphics.Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, android.graphics.Matrix().apply { postRotate(90f * rotation) }, true)
+                val width = toDecode.width
+                val height = toDecode.height
+                val pixels = IntArray(width * height)
+                toDecode.getPixels(pixels, 0, width, 0, 0, width, height)
+                val source = RGBLuminanceSource(width, height, pixels)
+                val binaryBitmap = BinaryBitmap(HybridBinarizer(source))
+                val reader = QRCodeReader()
+                val result = try {
+                    reader.decode(binaryBitmap)
+                } finally {
+                    reader.reset()
+                }
+                if (result != null && !result.text.isNullOrEmpty()) {
+                    if (toDecode != bitmap && !toDecode.isRecycled) toDecode.recycle()
+                    return result.text
+                }
+                if (toDecode != bitmap && !toDecode.isRecycled) toDecode.recycle()
+            } catch (e: Exception) { /* try next rotation */ }
+        }
+        return null
     }
     
     private fun addSite(name: String, secret: String, issuer: String) {
@@ -645,8 +839,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun checkForUpdates() {
         val currentVersion = try {
-            packageManager.getPackageInfo(packageName, 0).versionName ?: "1.1.7"
-        } catch (_: Exception) { "1.1.7" }
+            packageManager.getPackageInfo(packageName, 0).versionName ?: "1.1.8"
+        } catch (_: Exception) { "1.1.8" }
         
         lifecycleScope.launch(Dispatchers.IO) {
             try {
