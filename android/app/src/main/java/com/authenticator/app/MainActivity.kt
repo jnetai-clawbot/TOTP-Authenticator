@@ -28,9 +28,9 @@ import com.authenticator.app.db.Site
 import com.authenticator.app.db.SiteDatabase
 import com.authenticator.app.totp.TOTPGenerator
 import com.google.zxing.BinaryBitmap
-import com.google.zxing.QRCodeReader
 import com.google.zxing.RGBLuminanceSource
 import com.google.zxing.common.HybridBinarizer
+import com.google.zxing.qrcode.QRCodeReader
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanIntentResult
 import com.journeyapps.barcodescanner.ScanOptions
