@@ -111,7 +111,8 @@ object CryptoUtil {
     }
 
     /**
-     * Derives an AES-256 key from the master password using PBKDF2.
+     * Derives an AES-256 key from the master password using PBKDF2 and the salt that is
+     * stored in prefs. Used for the legacy backup format and password verification.
      */
     fun deriveKey(password: String): SecretKey {
         val prefs = getPrefs()
@@ -119,6 +120,15 @@ object CryptoUtil {
             ?: throw IllegalStateException("No salt found. Password not set.")
 
         val salt = Base64.decode(saltBase64, Base64.NO_WRAP)
+        return deriveKey(password, salt)
+    }
+
+    /**
+     * Derives an AES-256 key from the master password using PBKDF2 and the given salt.
+     * Deterministic for a given (password, salt) pair — used by the self-contained
+     * backup format so backups are portable across installs.
+     */
+    fun deriveKey(password: String, salt: ByteArray): SecretKey {
         val spec: KeySpec = PBEKeySpec(password.toCharArray(), salt, PBKDF2_ITERATIONS, KEY_LENGTH)
         val factory = SecretKeyFactory.getInstance(PBKDF2_ALGORITHM)
         return SecretKeySpec(factory.generateSecret(spec).encoded, "AES")
@@ -127,41 +137,84 @@ object CryptoUtil {
     // ---- Encryption/Decryption with Password-Derived Key ----
 
     /**
+     * Magic prefix for self-contained backups. The 16-byte random salt and 12-byte IV are
+     * embedded in the payload so the SAME password always reproduces the key on any device
+     * (survives uninstall/reinstall). Format:
+     *   TOTP1:<base64(salt)>:<base64(IV + AES-GCM ciphertext)>
+     */
+    private const val BACKUP_MAGIC = "TOTP1:"
+
+    /**
      * Encrypts plaintext using AES-256-GCM with a key derived from the master password.
-     * Returns Base64-encoded ciphertext (IV + encrypted data).
+     * The salt and IV are embedded in the returned payload (pure ASCII), so decryption
+     * works on any install/device as long as the same password is used.
      */
     fun encryptWithPassword(password: String, plaintext: String): String {
-        val key = deriveKey(password)
+        val salt = ByteArray(SALT_LENGTH).also { SecureRandom().nextBytes(it) }
+        val key = deriveKey(password, salt)
         val cipher = Cipher.getInstance(AES_ALGORITHM)
         cipher.init(Cipher.ENCRYPT_MODE, key)
 
         val iv = cipher.iv
         val encrypted = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
         val combined = iv + encrypted
-        return Base64.encodeToString(combined, Base64.NO_WRAP)
+        return BACKUP_MAGIC +
+            Base64.encodeToString(salt, Base64.NO_WRAP) + ":" +
+            Base64.encodeToString(combined, Base64.NO_WRAP)
     }
 
     /**
-     * Decrypts Base64-encoded ciphertext (IV + encrypted data) using a key derived from
-     * the master password.
+     * Decrypts a payload created by [encryptWithPassword] using only the master password.
+     * Falls back to the legacy format (salt stored in prefs) for backups made by older
+     * versions still existing on this install.
      */
-    fun decryptWithPassword(password: String, ciphertextBase64: String): String {
-        val key = deriveKey(password)
-        val combined = Base64.decode(ciphertextBase64, Base64.NO_WRAP)
+    fun decryptWithPassword(password: String, payload: String): String {
+        val trimmed = payload.trim()
+        return try {
+            if (trimmed.startsWith(BACKUP_MAGIC)) {
+                decryptSelfContained(password, trimmed)
+            } else {
+                decryptLegacy(password, trimmed)
+            }
+        } catch (e: Exception) {
+            if (e is IllegalArgumentException && e.message == FRIENDLY_DECRYPT_ERROR) throw e
+            throw IllegalArgumentException(FRIENDLY_DECRYPT_ERROR, e)
+        }
+    }
 
+    private fun decryptSelfContained(password: String, payload: String): String {
+        val body = payload.removePrefix(BACKUP_MAGIC)
+        val parts = body.split(":")
+        if (parts.size != 2) throw IllegalArgumentException(FRIENDLY_DECRYPT_ERROR)
+
+        val salt = Base64.decode(parts[0], Base64.NO_WRAP)
+        val combined = Base64.decode(parts[1], Base64.NO_WRAP)
+        return aesGcmDecrypt(password, salt, combined)
+    }
+
+    private fun decryptLegacy(password: String, payload: String): String {
+        val key = deriveKey(password)
+        val combined = Base64.decode(payload, Base64.NO_WRAP)
+        return aesGcmDecryptWithKey(key, combined)
+    }
+
+    private fun aesGcmDecrypt(password: String, salt: ByteArray, combined: ByteArray): String {
+        return aesGcmDecryptWithKey(deriveKey(password, salt), combined)
+    }
+
+    private fun aesGcmDecryptWithKey(key: SecretKey, combined: ByteArray): String {
         if (combined.size < GCM_IV_LENGTH + 1) {
             throw IllegalArgumentException("Ciphertext too short")
         }
-
         val iv = combined.copyOfRange(0, GCM_IV_LENGTH)
         val encrypted = combined.copyOfRange(GCM_IV_LENGTH, combined.size)
-
         val cipher = Cipher.getInstance(AES_ALGORITHM)
         val spec = GCMParameterSpec(GCM_TAG_LENGTH, iv)
         cipher.init(Cipher.DECRYPT_MODE, key, spec)
-
         return String(cipher.doFinal(encrypted), Charsets.UTF_8)
     }
+
+    private const val FRIENDLY_DECRYPT_ERROR = "Incorrect password or not a valid backup file"
 
     // ---- Helpers ----
 

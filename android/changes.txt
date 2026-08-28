@@ -1,5 +1,15 @@
 # Changes
 
+## v1.2.1
+
+- FIX: Backup/restore is now fully password-driven and portable
+  - Encrypted backup files are self-contained: the random salt + IV are embedded in the file,
+    so the SAME master password decrypts the backup after uninstall/reinstall or on a new device
+  - Old-format backups on the current install still restore (legacy fallback kept)
+- FIX: Clearer error message on restore ("Incorrect password or not a valid backup file")
+  instead of "bad base-64"; trailing whitespace/newlines in the file are ignored
+- CHORE: Version bumped to 1.2.1 (versionCode 15)
+
 ## v1.2.0
 
 - FEAT: Long press a site to show options

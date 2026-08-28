@@ -300,7 +300,7 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val encryptedData = withContext(Dispatchers.IO) {
-                    contentResolver.openInputStream(uri)?.bufferedReader()?.readText()
+                    contentResolver.openInputStream(uri)?.bufferedReader()?.readText()?.trim()
                         ?: throw Exception("Could not read backup file")
                 }
                 val count = driveBackupManager.restoreFromBackup(masterPassword, encryptedData)
@@ -866,8 +866,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun checkForUpdates() {
         val currentVersion = try {
-            packageManager.getPackageInfo(packageName, 0).versionName ?: "1.2.0"
-        } catch (_: Exception) { "1.2.0" }
+            packageManager.getPackageInfo(packageName, 0).versionName ?: "1.2.1"
+        } catch (_: Exception) { "1.2.1" }
         
         lifecycleScope.launch(Dispatchers.IO) {
             try {
