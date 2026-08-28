@@ -1,5 +1,19 @@
 # Changes
 
+## v1.1.9
+
+- FEAT: Backup / Restore card (was "Cloud Backup")
+  - "Backup / Restore" header with Backup and Restore buttons side by side
+  - Restore loads an encrypted .enc backup file via system file picker (SAF)
+- FIX: Update checker now compares semantic version numbers
+  - Reads version from release tag (e.g. v1.1.8), compares against installed versionName
+  - Shows "Update available" / "You are up to date", Download button only when newer
+- CHORE: GitHub release now tagged v<version> (from build.gradle) instead of totp-vN
+- CHORE: Release now contains only ONE APK named TOTP-Authenticator.apk (the largest build)
+- CHORE: The largest APK is signed with the production keystore so it updates in place over
+  the previous version without requiring uninstall
+- CHORE: Version bumped to 1.1.9 (versionCode 13)
+
 ## v1.1.8
 
 - FEAT: QR code scanning to pair accounts like Google Authenticator

@@ -178,7 +178,8 @@ class MainActivity : AppCompatActivity() {
     private fun setupClickListeners() {
         try {
             binding.fabAddSite.setOnClickListener { showAddDialog() }
-            binding.btnGoogleSignIn.setOnClickListener { openBackupFilePicker() }
+            binding.btnBackup.setOnClickListener { openBackupFilePicker() }
+            binding.btnRestore.setOnClickListener { openRestoreFilePicker() }
             updateGoogleSignInCard()
 
             // Search functionality
@@ -233,8 +234,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateGoogleSignInCard() {
         try {
-            binding.tvSignedInAs.text = "Save encrypted backup to cloud"
-            binding.btnGoogleSignIn.text = getString(com.authenticator.app.R.string.backup_now)
+            binding.tvSignedInStatus.text = getString(com.authenticator.app.R.string.backup_restore)
+            binding.tvSignedInAs.text = getString(com.authenticator.app.R.string.backup_restore_subtitle)
+            binding.btnBackup.text = getString(com.authenticator.app.R.string.backup_now)
+            binding.btnRestore.text = getString(com.authenticator.app.R.string.restore_from_backup)
         } catch (e: Exception) {
             logError("updateGoogleSignInCard", e)
         }
@@ -839,8 +842,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun checkForUpdates() {
         val currentVersion = try {
-            packageManager.getPackageInfo(packageName, 0).versionName ?: "1.1.8"
-        } catch (_: Exception) { "1.1.8" }
+            packageManager.getPackageInfo(packageName, 0).versionName ?: "1.1.9"
+        } catch (_: Exception) { "1.1.9" }
         
         lifecycleScope.launch(Dispatchers.IO) {
             try {
@@ -865,23 +868,30 @@ class MainActivity : AppCompatActivity() {
                 
                 val gson = Gson()
                 val release = gson.fromJson(response, Map::class.java)
-                val latestTag = release["tag_name"] as? String ?: "unknown"
+                val latestTag = release["tag_name"] as? String ?: ""
                 val htmlUrl = release["html_url"] as? String ?: "https://github.com/jnetai-clawbot/TOTP-Authenticator/releases/latest"
                 
+                // Parse semantic version (e.g. "v1.1.8" or "1.1.8") from the tag
+                val latestVersion = extractVersion(latestTag) ?: currentVersion
+
                 withContext(Dispatchers.Main) {
-                    val updateDialog = androidx.appcompat.app.AlertDialog.Builder(this@MainActivity)
+                    val updateAvailable = compareVersions(latestVersion, currentVersion) > 0
+                    val status = if (updateAvailable) "✓ Update available" else "✓ You are up to date"
+                    val dialog = androidx.appcompat.app.AlertDialog.Builder(this@MainActivity)
                         .setTitle("Update Check")
-                        .setMessage("Current version: $currentVersion\nLatest release: $latestTag")
-                        .setPositiveButton("Download Update →") { _, _ ->
+                        .setMessage("Current version: $currentVersion\nLatest version: $latestVersion\n$status")
+                    if (updateAvailable) {
+                        dialog.setPositiveButton("Download Update →") { _, _ ->
                             try {
                                 startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(htmlUrl)))
                             } catch (e: Exception) {
                                 showToast("Browser not available")
                             }
                         }
-                        .setNegativeButton("Close", null)
+                    }
+                    dialog.setNegativeButton("Close", null)
                         .create()
-                    updateDialog.show()
+                        .show()
                 }
             } catch (e: Exception) {
                 android.util.Log.e("Authenticator", "Update check failed: ${e.message}", e)
@@ -890,6 +900,25 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    private fun extractVersion(text: String): String? {
+        // Pull a semantic version (e.g. "1.1.8" from "v1.1.8") out of the tag.
+        val parts = text.split(".").mapNotNull {
+            Regex("""(\d+)""").find(it)?.groupValues?.get(1)?.toIntOrNull()
+        }
+        return if (parts.size >= 2) parts.joinToString(".") else null
+    }
+
+    private fun compareVersions(a: String, b: String): Int {
+        val aa = a.split(".").map { it.toIntOrNull() ?: 0 }
+        val bb = b.split(".").map { it.toIntOrNull() ?: 0 }
+        for (i in 0 until maxOf(aa.size, bb.size)) {
+            val x = aa.getOrElse(i) { 0 }
+            val y = bb.getOrElse(i) { 0 }
+            if (x != y) return if (x > y) 1 else -1
+        }
+        return 0
     }
 
     // ---- Settings Dialog ----

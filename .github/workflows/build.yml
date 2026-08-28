@@ -31,32 +31,20 @@ jobs:
           echo "Keystore imported"
       
       - name: Build debug APK
-        run: |
-          cd android
-          chmod +x gradlew
-          ./gradlew assembleDebug 2>&1
-      
-      - name: Build release APK
         env:
           KEYSTORE_PASSWORD: "${{ secrets.KEYSTORE_PASSWORD }}"
           KEY_PASSWORD: "${{ secrets.KEY_PASSWORD }}"
         run: |
           cd android
-          ./gradlew assembleRelease 2>&1
+          chmod +x gradlew
+          ./gradlew assembleDebug 2>&1
       
-      - name: Rename APKs
+      - name: Rename APK
         run: |
-          cp android/app/build/outputs/apk/debug/app-debug.apk TOTP-Authenticator-debug.apk
-          cp android/app/build/outputs/apk/release/app-release.apk TOTP-Authenticator.apk
-          ls -lh TOTP-Authenticator*.apk
+          cp android/app/build/outputs/apk/debug/app-debug.apk TOTP-Authenticator.apk
+          ls -lh TOTP-Authenticator.apk
       
-      - name: Upload debug APK (artifact)
-        uses: actions/upload-artifact@v4
-        with:
-          name: TOTP-Authenticator-debug
-          path: TOTP-Authenticator-debug.apk
-      
-      - name: Upload release APK (artifact)
+      - name: Upload APK (artifact)
         uses: actions/upload-artifact@v4
         with:
           name: TOTP-Authenticator
@@ -66,19 +54,18 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION="v${{ github.run_number }}"
-          TAG="totp-$VERSION"
-          
-          echo "gh version: $(gh --version)"
+          VERSION=$(grep -oP 'versionName "\K[^"]+' android/app/build.gradle)
+          TAG="v$VERSION"
+
+          echo "Version: $VERSION"
           echo "Creating release $TAG"
-          
+
           gh release create "$TAG" \
             --title "TOTP Authenticator $VERSION" \
             --notes "TOTP Authenticator $VERSION
-          - Debug: TOTP-Authenticator-debug.apk
-          - Release (signed): TOTP-Authenticator.apk
 
           Target devices: Samsung S7, S8, Pixel 6, Pixel 7 (minSdk 24)
-          Features: Google Sign-In, QR scanning, encrypted storage, dark theme" \
-            TOTP-Authenticator-debug.apk TOTP-Authenticator.apk || \
-          gh release upload "$TAG" TOTP-Authenticator-debug.apk TOTP-Authenticator.apk --clobber
+          Features: Google Sign-In, QR scanning, encrypted storage, dark theme
+          Backup / Restore via encrypted file (SAF)" \
+            TOTP-Authenticator.apk || \
+          gh release upload "$TAG" TOTP-Authenticator.apk --clobber
