@@ -10,7 +10,8 @@ import com.authenticator.app.db.Site
 
 class SitesAdapter(
     private val onCopyClick: (Site) -> Unit,
-    private val onEditClick: (Site) -> Unit
+    private val onEditClick: (Site) -> Unit,
+    private val onLongClick: (Site) -> Unit
 ) : ListAdapter<Site, SitesAdapter.SiteViewHolder>(SiteDiffCallback()) {
 
     private var currentCodes = mutableMapOf<String, Pair<String, Int>>()
@@ -65,6 +66,11 @@ class SitesAdapter(
 
             binding.btnEdit.setOnClickListener {
                 onEditClick(site)
+            }
+
+            binding.root.setOnLongClickListener {
+                onLongClick(site)
+                true
             }
         }
 

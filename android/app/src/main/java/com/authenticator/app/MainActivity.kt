@@ -166,7 +166,8 @@ class MainActivity : AppCompatActivity() {
         try {
             adapter = SitesAdapter(
                 onCopyClick = { site -> safeCall("copyCode") { copyCode(site.name) } },
-                onEditClick = { site -> safeCall("editSite") { showEditDialog(site) } }
+                onEditClick = { site -> safeCall("editSite") { showEditDialog(site) } },
+                onLongClick = { site -> safeCall("siteOptions") { showSiteOptions(site) } }
             )
             binding.recyclerSites.layoutManager = LinearLayoutManager(this)
             binding.recyclerSites.adapter = adapter
@@ -684,6 +685,29 @@ class MainActivity : AppCompatActivity() {
         }
     }
     
+    private fun showSiteOptions(site: Site) {
+        try {
+            val options = arrayOf(
+                "Copy Code",
+                "Edit Site",
+                "Remove"
+            )
+            AlertDialog.Builder(this)
+                .setTitle(site.name)
+                .setItems(options) { _, which ->
+                    when (which) {
+                        0 -> safeCall("copyCode") { copyCode(site.name) }
+                        1 -> safeCall("editSite") { showEditDialog(site) }
+                        2 -> safeCall("deleteSite") { showDeleteConfirmation(site) }
+                    }
+                }
+                .setNegativeButton(getString(com.authenticator.app.R.string.cancel), null)
+                .show()
+        } catch (e: Exception) {
+            logError("showSiteOptions", e)
+        }
+    }
+
     private fun showDeleteConfirmation(site: Site) {
         try {
             AlertDialog.Builder(this)
@@ -842,8 +866,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun checkForUpdates() {
         val currentVersion = try {
-            packageManager.getPackageInfo(packageName, 0).versionName ?: "1.1.9"
-        } catch (_: Exception) { "1.1.9" }
+            packageManager.getPackageInfo(packageName, 0).versionName ?: "1.2.0"
+        } catch (_: Exception) { "1.2.0" }
         
         lifecycleScope.launch(Dispatchers.IO) {
             try {

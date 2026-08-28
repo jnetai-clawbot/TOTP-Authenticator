@@ -1,5 +1,12 @@
 # Changes
 
+## v1.2.0
+
+- FEAT: Long press a site to show options
+  - Copy Code, Edit Site, Remove
+  - Remove shows a confirmation box before deleting
+- CHORE: Version bumped to 1.2.0 (versionCode 14)
+
 ## v1.1.9
 
 - FEAT: Backup / Restore card (was "Cloud Backup")
